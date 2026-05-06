@@ -22,7 +22,7 @@
   "sideEffects": false,
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/puristajs/harness.git",
+    "url": "https://github.com/puristajs/harness",
     "directory": "packages/harness-openai"
   },
   "bugs": {

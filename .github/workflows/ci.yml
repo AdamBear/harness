@@ -7,13 +7,17 @@ on:
       - 'codex/**'
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  verify:
+    if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: [20, 22, 24]
 
     steps:
       - name: Checkout
@@ -28,11 +32,14 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
       - name: Build
         run: npm run build
 
       - name: Test
-        run: npm test -- --coverage
+        run: npm test
 
       - name: Contracts
         run: npm run test:contracts
@@ -45,3 +52,89 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+  verify-and-publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'puristajs/harness'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    concurrency:
+      group: npm-publish-${{ github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+          scope: '@purista'
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Contracts
+        run: npm run test:contracts
+
+      - name: Integration
+        run: npm run test:integration
+
+      - name: Failure tests
+        run: npm run test:failure
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Verify package contents
+        run: |
+          npm pack --workspace @purista/harness --dry-run
+          npm pack --workspace @purista/harness-openai --dry-run
+
+      - name: Publish packages
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const { execSync } = require('node:child_process')
+
+          const packageDirs = [
+            path.join(process.cwd(), 'packages/harness'),
+            path.join(process.cwd(), 'packages/harness-openai')
+          ]
+
+          for (const dir of packageDirs) {
+            const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'))
+            const spec = `${pkg.name}@${pkg.version}`
+
+            try {
+              const published = execSync(`npm view "${spec}" version --registry=https://registry.npmjs.org --silent`, {
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'pipe']
+              }).trim()
+              if (published === pkg.version) {
+                console.log(`Skipping ${spec} because it is already published.`)
+                continue
+              }
+            } catch {
+              // npm view exits non-zero when this exact version has not been published yet.
+            }
+
+            console.log(`Publishing ${spec}`)
+            execSync('npm publish --access public', { cwd: dir, stdio: 'inherit' })
+          }
+          NODE
