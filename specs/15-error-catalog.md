@@ -31,8 +31,8 @@ Returns `true` iff `value` is an instance of `HarnessError` (i.e. any error clas
 - code: `VALIDATION_ERROR`
 - category: `validation`
 - retriable: `false`
-- when: Zod or JSON Schema parse failure on tool/agent/workflow/MCP input/output, memory key, memory value, model response shape, or per-call `timeoutMs` invariants.
-- meta: `where: 'agent_input'|'agent_output'|'workflow_input'|'workflow_output'|'tool_input'|'tool_output'|'mcp_input'|'mcp_output'|'model_response'|'memory_key'|'memory_value'|'message'|'session_history'|'invoke_options'`, `issues: unknown`.
+- when: Zod or JSON Schema parse failure on tool/agent/workflow/MCP input/output, memory key, memory value, model request/response shape, structured object validation, embedding/rerank input invariants, or per-call `timeoutMs` invariants.
+- meta: `where: 'agent_input'|'agent_output'|'workflow_input'|'workflow_output'|'tool_input'|'tool_output'|'mcp_input'|'mcp_output'|'model_request'|'model_response'|'memory_key'|'memory_value'|'message'|'session_history'|'invoke_options'`, `issues: unknown`.
 
 ### `PermissionDeniedError`
 - code: `PERMISSION_DENIED`
@@ -59,14 +59,14 @@ Returns `true` iff `value` is an instance of `HarnessError` (i.e. any error clas
 - code: `MODEL_ERROR`
 - category: `model`
 - retriable: dynamic — `true` for HTTP 5xx, network errors, HTTP 429; `false` for 4xx (except 429).
-- when: Provider failed, or harness detected a structurally invalid response (e.g. default loop expecting `data` in a `JsonResponse` and finding none).
-- meta: `provider: string`, `model: string`, `method: string`, `status?: number`, `reason?: 'http_error'|'network'|'unstructured_response'|'malformed_response'|'context_length_exceeded'`.
+- when: Provider failed, or harness detected a structurally invalid response (e.g. default loop expecting `object` in an `ObjectResponse` and finding none, embedding count mismatch, rerank result id mismatch).
+- meta: `provider: string`, `model: string`, `method: string`, `status?: number`, `reason?: 'http_error'|'network'|'unstructured_response'|'malformed_response'|'context_length_exceeded'|'embedding_count_mismatch'|'rerank_result_mismatch'`.
 
 ### `ModelCapabilityError`
 - code: `MODEL_CAPABILITY_ERROR`
 - category: `model`
 - retriable: `false`
-- when: Method called on alias missing the capability, OR provider doesn't implement claimed method.
+- when: Method called on alias missing the capability, content part requires a missing capability, OR provider doesn't implement claimed method.
 - meta: `alias: string`, `method: string`, `reason: 'missing_capability'|'method_missing'`.
 
 ### `ToolError`

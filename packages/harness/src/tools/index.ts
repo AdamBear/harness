@@ -75,15 +75,14 @@ export async function invokeBuiltinTool(nameOrAlias: string, input: unknown, ses
       }
       case 'grep': {
         const parsed = schemas.grep.input.parse(input)
-        const rx = new RegExp(parsed.pattern)
-        if (session.executor === 'available') {
-          const escaped = parsed.pattern.replaceAll('"', '\\"')
-          const r = await session.exec(`grep -rn \"${escaped}\" ${parsed.path}`, signal ? { signal } : undefined)
-          const matches = r.stdout.split('\n').filter(Boolean).slice(0, parsed.maxResults).map((line) => {
-            const [file, ln, ...rest] = line.split(':')
-            return { path: file ?? '', line: Number(ln ?? '0'), text: rest.join(':') }
+        let rx: RegExp
+        try {
+          rx = new RegExp(parsed.pattern)
+        } catch (error) {
+          throw new ValidationError('grep pattern must be a valid regular expression', {
+            where: 'tool_input',
+            issues: [{ path: 'pattern', message: error instanceof Error ? error.message : 'Invalid regular expression' }]
           })
-          return { matches } as JsonValue
         }
         const entries = await session.list(parsed.path, { recursive: true })
         const matches: Array<{ path: string; line: number; text: string }> = []
@@ -93,10 +92,10 @@ export async function invokeBuiltinTool(nameOrAlias: string, input: unknown, ses
           for (let i = 0; i < lines.length; i += 1) {
             const currentLine = lines[i]
             if (currentLine !== undefined && rx.test(currentLine)) matches.push({ path: entry.path, line: i + 1, text: currentLine })
-            if (matches.length >= parsed.maxResults) return { matches }
+            if (matches.length >= parsed.maxResults) return schemas.grep.output.parse({ matches }) as JsonValue
           }
         }
-        return { matches } as JsonValue
+        return schemas.grep.output.parse({ matches }) as JsonValue
       }
       case 'list': {
         const parsed = schemas.list.input.parse(input)

@@ -118,7 +118,7 @@ Permission denials inside the loop are *recoverable* — the model is informed v
 
 ## Default loop
 
-The default loop requires the agent's model alias to claim `'json'` (and `'tool_use'` if the agent declares any `tools` or has any built-in tools enabled). Enforced at `defineHarness` time.
+The default loop requires the agent's model alias to claim `'object'` (and `'tool_use'` if the agent declares any `tools` or has any built-in tools enabled). Enforced at `defineHarness` time.
 
 When `handler` is undefined, the harness executes this algorithm:
 
@@ -132,9 +132,9 @@ When `handler` is undefined, the harness executes this algorithm:
    - Built-in tools per `builtinTools` rule, filtered by sandbox executor availability.
 5. **Build initial messages**: prior conversation history (capped by effective `historyWindow`) + the current user input as `Message{role:'user', content: stringify(input)}`. `stringify` is `String(input)` if a string, else `JSON.stringify(input)`.
 6. **Loop** up to `maxSteps`:
-   - a. Call `models[model].json(messages, tools, schema=outputSchema)`.
-   - b. If response has no tool calls and includes structured `data` matching the output schema: validate; return.
-   - c. If response has no tool calls and no valid `data`: throw `ModelError{reason:'unstructured_response'}`.
+   - a. Call `models[model].object(messages, tools, schema=outputSchema)`.
+   - b. If response has no tool calls and includes structured `object` matching the output schema: validate; return.
+   - c. If response has no tool calls and no valid `object`: throw `ModelError{reason:'unstructured_response'}`.
    - d. For each tool call (sequential, in order returned):
      - Resolve canonical tool name (alias → canonical).
      - Check permissions. On `'deny'`, append a tool result message `{role:'tool', content: JSON.stringify({error:'PERMISSION_DENIED'})}` and continue (does NOT throw — the model can adapt).
@@ -200,7 +200,7 @@ When `handler` is provided, the harness skips the default loop and invokes `hand
 - Span `execute_tool {tool.name}` per tool call (GenAI conv); for permission-gated calls, attributes `harness.permission.mode` and `harness.permission.decision`.
 - Histogram `harness.agent.iterations` (sample of total iterations).
 - Counter `harness.permission.denials` per denied tool call.
-- RunEvents: `agent.started`, `agent.finished`, `model.delta`/`model.message`, `tool.started`/`tool.finished`.
+- RunEvents: `agent.started`, `agent.finished`, `model.delta`/`model.message`, `model.object.partial`/`model.object` where structured output streaming is used, `tool.started`/`tool.finished`.
 
 ## Errors
 

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { expect, it } from 'vitest'
-import { defineHarness, inMemorySandbox, InMemoryStateStore, StateError, type FinishRunPatch, type PersistedRunEvent } from '../../src/index.js'
+import { defineHarness, inMemorySandbox, InMemoryStateStore, JsonLogger, StateError, type FinishRunPatch, type PersistedRunEvent, type SessionRecord } from '../../src/index.js'
 import type { RunRecord } from '../../src/models/state.js'
 
 class CreateRunFailingStateStore extends InMemoryStateStore {
@@ -20,6 +20,26 @@ class CreateRunFailingStateStore extends InMemoryStateStore {
   }
 }
 
+class FailureTerminalizationStateStore extends InMemoryStateStore {
+  public constructor(private readonly failingOperation: 'finishRun' | 'upsertSession') {
+    super()
+  }
+
+  public override async finishRun(runId: string, patch: FinishRunPatch): Promise<void> {
+    if (this.failingOperation === 'finishRun') {
+      throw new StateError('finishRun failed', { op: 'finishRun', reason: 'injected_failure' })
+    }
+    await super.finishRun(runId, patch)
+  }
+
+  public override async upsertSession(record: SessionRecord): Promise<void> {
+    if (this.failingOperation === 'upsertSession' && record.runCount > 0) {
+      throw new StateError('upsertSession failed', { op: 'upsertSession', reason: 'injected_failure' })
+    }
+    await super.upsertSession(record)
+  }
+}
+
 it('does not emit or finish a run when createRun fails', async () => {
   const state = new CreateRunFailingStateStore()
   const harness = defineHarness()
@@ -30,12 +50,12 @@ it('does not emit or finish a run when createRun fails', async () => {
         provider: {
           id: 'fake',
           genAiSystem: 'fake',
-          async json() {
-            return { data: 'should not run', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } }
+          async object() {
+            return { object: 'should not run', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }, finishReason: 'stop' }
           }
         },
         model: 'fake',
-        capabilities: ['json']
+        capabilities: ['object']
       }
     })
     .agents({ assistant: { model: 'fake', instructions: 'Return text.', builtinTools: false } })
@@ -53,3 +73,43 @@ it('does not emit or finish a run when createRun fails', async () => {
   expect(state.appendedEvents).toEqual([])
   expect(state.finishRunCalls).toEqual([])
 })
+
+it.each(['finishRun', 'upsertSession'] as const)(
+  'preserves the original workflow/model failure when %s fails during failure terminalization',
+  async (failingOperation) => {
+    const state = new FailureTerminalizationStateStore(failingOperation)
+    const primaryError = new Error('model failed first')
+    const logs: string[] = []
+    const harness = defineHarness()
+      .logger(new JsonLogger({ level: 'error', out: { write: (chunk) => logs.push(chunk) } }))
+      .state(state)
+      .sandbox(inMemorySandbox())
+      .models({
+        fake: {
+          provider: {
+            id: 'fake',
+            genAiSystem: 'fake',
+            async object() {
+              throw primaryError
+            }
+          },
+          model: 'fake',
+          capabilities: ['object']
+        }
+      })
+      .agents({ assistant: { model: 'fake', instructions: 'Return text.', builtinTools: false } })
+      .workflows({
+        wf: {
+          input: z.string(),
+          output: z.string(),
+          handler: async (ctx) => ctx.agents.assistant(ctx.input)
+        }
+      })
+      .build()
+
+    const session = await harness.getSession('s1')
+    await expect(session.workflows.wf.prompt('hello')).rejects.toBe(primaryError)
+    expect(logs.join('')).toContain('Failed to terminalize failed run; preserving primary run error.')
+    expect(logs.join('')).toContain(failingOperation === 'finishRun' ? 'finish_run' : 'upsert_session')
+  }
+)

@@ -22,10 +22,16 @@ Implement `ModelProvider` or extend `BaseModelProvider`.
 Adapter responsibilities:
 
 - translate harness requests to the provider SDK;
-- map content, tool calls, token usage, and finish reasons;
+- map text, structured object, multimodal content, tool calls, embeddings,
+  rerank results, token usage, and finish reasons;
 - pass through provider SDK options where possible;
 - let `BaseModelProvider` handle timeout, cancellation, logging, tracing, and
   normalized errors.
+
+Provider adapters should expose `object(...)` and `objectStream(...)` for
+schema-validated structured output. Expose `embed(...)` and `rerank(...)` only
+when the provider SDK can support those operations cleanly; otherwise omit the
+method and do not declare the matching capability.
 
 ## Add A State Store Adapter
 
@@ -43,6 +49,49 @@ Sandbox sessions must make executor availability explicit:
 
 - `executor: 'unavailable'` for file-only sessions;
 - `executor: 'available'` when `exec(...)` is supported.
+
+Snapshot-capable adapters may also implement `snapshot(...)`, `resume(...)`,
+and `hibernate(...)`. Declare the matching adapter capabilities so applications
+can fail early when they require durable sandbox behavior:
+
+```ts
+defineHarness()
+  .sandbox(snapshotCapableSandbox)
+  .requires(['sandbox.snapshot', 'sandbox.resume'])
+```
+
+Preview ports and browser routing remain application concerns, not core
+sandbox capabilities.
+
+## Add A Durable Runtime Adapter
+
+Durable execution is opt-in. A runtime adapter declares capabilities and owns
+checkpoint storage, leases, retries, and resume behavior.
+
+```ts
+const harness = defineHarness()
+  .runtime(inMemoryDurableRuntime())
+  .requires(['runtime.checkpoint', 'runtime.resume_from_checkpoint'])
+  .models(...)
+  .agents(...)
+  .build()
+```
+
+Streams remain observation only. Recovery starts from the last committed
+checkpoint, not from a stream cursor.
+
+## Attach Feedback
+
+Feedback is optional and app-defined. Core exports shared target/record types;
+applications or addon packages own storage and learning workflows.
+
+```ts
+feedback.record({
+  target: { kind: 'run', runId },
+  source: 'user',
+  label: 'useful'
+})
+```
 
 ## Add TypeScript Tools
 

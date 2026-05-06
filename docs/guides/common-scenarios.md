@@ -64,6 +64,35 @@ z.object({
 Add a workflow when you need query rewriting before the agent, multiple
 retriever agents, answer grading after the agent, or durable report artifacts.
 
+### Embeddings And Reranking
+
+Use embeddings and reranking as retrieval workflow steps, not as hidden agent
+message types. A workflow can embed the query, read candidate documents from an
+application-owned vector index, rerank the candidates, then pass the selected
+evidence to a normal object-output agent.
+
+```ts
+const queryEmbedding = await ctx.models.retrieval.embed({
+  input: ctx.input.question
+})
+
+const candidates = await vectorIndex.search(queryEmbedding.embeddings[0].vector)
+
+const ranked = await ctx.models.ranker.rerank({
+  query: ctx.input.question,
+  documents: candidates.map((doc) => ({
+    id: doc.id,
+    text: doc.text,
+    metadata: { source: doc.source }
+  })),
+  topN: 5
+})
+```
+
+The harness owns provider calls, timeout/cancellation, usage metadata, and run
+observation. The vector database, retrieval policy, and final prompt assembly
+stay in application code.
+
 ## Human-In-The-Loop Review
 
 Use a workflow when proposed changes should not be applied until a human

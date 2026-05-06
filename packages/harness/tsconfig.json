@@ -3,20 +3,13 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
+    "declarationMap": false,
+    "sourceMap": false,
     "types": ["node", "vitest/globals"]
   },
   "include": [
-    "src/models/globals.d.ts",
-    "src/errors/**/*.ts",
-    "src/logger/**/*.ts",
-    "src/telemetry/**/*.ts",
-    "src/ulid/**/*.ts",
-    "src/ports/**/*.ts",
-    "src/state/**/*.ts",
-    "src/models/**/*.ts",
-    "src/tools/**/*.ts",
-    "src/testing/stateStoreContract.ts",
-    "src/index.ts"
+    "src/**/*.ts",
+    "src/**/*.d.ts"
   ],
-  "exclude": ["dist", "node_modules"]
+  "exclude": ["dist", "node_modules", "src/**/*.test.ts"]
 }

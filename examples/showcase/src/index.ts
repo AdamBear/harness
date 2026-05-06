@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
-import { defineHarness, inMemorySandbox, type JsonResponse, type ModelProvider } from '@purista/harness'
+import { defineHarness, inMemorySandbox, type JsonValue, type ModelProvider, type ObjectRequest, type ObjectResponse } from '@purista/harness'
 import { openai } from '@purista/harness-openai'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -32,17 +32,17 @@ function requireOpenAiKey(): string {
   return apiKey
 }
 
-class ScriptedJsonProvider implements ModelProvider {
+class ScriptedObjectProvider implements ModelProvider {
   public readonly id = 'scripted'
   public readonly genAiSystem = 'example'
   public readonly requests: Array<{ messages: unknown[]; tools: unknown[] }> = []
 
-  async json(req: Parameters<NonNullable<ModelProvider['json']>>[0]): Promise<JsonResponse> {
+  async object<T extends JsonValue = JsonValue>(req: ObjectRequest<T>): Promise<ObjectResponse<T>> {
     this.requests.push({ messages: req.messages, tools: req.tools ?? [] })
 
     if ((req.tools ?? []).some((tool) => tool.name === 'policy_lookup') && !req.messages.some((message) => message.role === 'tool')) {
       return {
-        data: {},
+        object: {} as T,
         toolCalls: [{ id: 'lookup_1', name: 'policy_lookup', arguments: { topic: 'security' } }],
         usage: { inputTokens: 12, outputTokens: 4, totalTokens: 16 },
         finishReason: 'tool_calls'
@@ -52,14 +52,14 @@ class ScriptedJsonProvider implements ModelProvider {
     const toolResult = req.messages.find((message) => message.role === 'tool')
     if (toolResult) {
       return {
-        data: { answer: `Tool-backed answer: ${toolResult.content}` },
+        object: { answer: `Tool-backed answer: ${toolResult.content}` } as unknown as T,
         usage: { inputTokens: 20, outputTokens: 8, totalTokens: 28 },
         finishReason: 'stop'
       }
     }
 
     return {
-      data: { summary: 'Impact is limited; validate logs and assign an owner.' },
+      object: { summary: 'Impact is limited; validate logs and assign an owner.' } as unknown as T,
       usage: { inputTokens: 10, outputTokens: 7, totalTokens: 17 },
       finishReason: 'stop'
     }
@@ -78,12 +78,12 @@ export function createShowcaseHarness(provider?: ModelProvider) {
         structured: {
           provider: modelProvider,
           model,
-          capabilities: ['json']
+          capabilities: ['object']
         },
         toolReady: {
           provider: modelProvider,
           model,
-          capabilities: ['json', 'tool_use']
+          capabilities: ['object', 'tool_use']
         }
       })
       .tools({
@@ -143,7 +143,7 @@ export function createShowcaseHarness(provider?: ModelProvider) {
   }
 }
 
-export { ScriptedJsonProvider }
+export { ScriptedObjectProvider }
 
 export async function runShowcase(): Promise<void> {
   const { harness } = createShowcaseHarness()

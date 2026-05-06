@@ -1,6 +1,10 @@
 import { z } from 'zod'
 import { defineHarness } from '../src/harness/defineHarness.js'
-import type { ModelProvider } from '../src/ports/model-provider.js'
+import { createModelRegistry } from '../src/models/registry.js'
+import { inMemorySandbox } from '../src/index.js'
+import type { BuilderState, Harness, HarnessBuilder, ModelsConfig } from '../src/harness/defineHarness.js'
+import type { AdapterCapability, HarnessInspection } from '../src/ports/capabilities.js'
+import type { JsonValue, ModelProvider, ObjectRequest, ObjectResponse } from '../src/index.js'
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
 type Expect<T extends true> = T
@@ -9,9 +13,9 @@ type IsAny<T> = 0 extends 1 & T ? true : false
 const provider: ModelProvider = {
   id: 'type-test-provider',
   genAiSystem: 'type-test',
-  async json() {
+  async object<T extends JsonValue = JsonValue>(_req: ObjectRequest<T>): Promise<ObjectResponse<T>> {
     return {
-      data: 'ok',
+      object: 'ok' as unknown as T,
       usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       finishReason: 'stop'
     }
@@ -20,7 +24,7 @@ const provider: ModelProvider = {
 
 const harness = defineHarness()
   .models({
-    assistant: { provider, model: 'type-test-model', capabilities: ['json'] }
+    assistant: { provider, model: 'type-test-model', capabilities: ['object'] }
   })
   .agents(({ agent }) => ({
     planner: agent({
@@ -90,3 +94,91 @@ async function invokeWorkflow() {
   // @ts-expect-error workflow prompt input must match the sibling input schema
   await session.workflows.prepare.prompt({ topic: 'wrong key' })
 }
+
+type CapabilityAwareBuilder<S extends BuilderState> = Omit<HarnessBuilder<S>, 'build' | 'models'> & {
+  requires(required: readonly AdapterCapability[]): CapabilityAwareBuilder<S>
+  models<const M extends ModelsConfig>(models: M): CapabilityAwareBuilder<S & { models: M }>
+  build(): Harness<S> & { inspect(): HarnessInspection }
+}
+
+const futureCapabilityHarness = (defineHarness() as CapabilityAwareBuilder<{}>)
+  .requires(['sandbox.snapshot', 'sandbox.resume', 'runtime.checkpoint'])
+  .models({
+    assistant: { provider, model: 'type-test-model', capabilities: ['object'] }
+  })
+  .build()
+
+const futureCapabilities = futureCapabilityHarness.inspect().capabilities
+type AdapterCapabilityList = readonly AdapterCapability[]
+const _futureCapabilitiesExact: Expect<Equal<typeof futureCapabilities, AdapterCapabilityList>> = true
+
+// @ts-expect-error requires only accepts stable AdapterCapability values
+const _invalidFutureRequirement: AdapterCapability = 'sandbox.teleport'
+
+const capabilityRegistry = createModelRegistry({
+  textOnly: { provider, model: 'type-test-model', capabilities: ['text'] },
+  embeddingReady: { provider, model: 'type-test-model', capabilities: ['text', 'embeddings'] }
+})
+
+capabilityRegistry['textOnly']!.text({ messages: [] }, new AbortController().signal)
+// @ts-expect-error tools require the tool_use marker capability
+capabilityRegistry['textOnly']!.text({ messages: [], tools: [] }, new AbortController().signal)
+// @ts-expect-error image parts require the vision_input marker capability
+capabilityRegistry['textOnly']!.text({ messages: [{ role: 'user', content: [{ kind: 'image_url', url: 'https://example.com/image.png' }] }] }, new AbortController().signal)
+// @ts-expect-error embeddings are not exposed unless the alias declares the embeddings capability
+capabilityRegistry['textOnly']!.embed({ input: 'hello' }, new AbortController().signal)
+capabilityRegistry['embeddingReady']!.embed({ input: 'hello' }, new AbortController().signal)
+// @ts-expect-error rerank is not exposed unless the alias declares the rerank capability
+capabilityRegistry['embeddingReady']!.rerank({ query: 'hello', documents: [] }, new AbortController().signal)
+
+const richCapabilityRegistry = createModelRegistry({
+  visionToolModel: { provider, model: 'type-test-model', capabilities: ['text', 'tool_use', 'vision_input'] }
+})
+
+richCapabilityRegistry['visionToolModel']!.text({
+  messages: [{ role: 'user', content: [{ kind: 'image_url', url: 'https://example.com/image.png' }] }],
+  tools: []
+}, new AbortController().signal)
+// @ts-expect-error audio parts require the audio_input marker capability
+richCapabilityRegistry['visionToolModel']!.text({ messages: [{ role: 'user', content: [{ kind: 'audio', mimeType: 'audio/wav', dataBase64: 'abc' }] }] }, new AbortController().signal)
+
+async function sandboxCapabilityTypes() {
+  const session = await inMemorySandbox().open({ sessionId: 'type-session', runId: 'type-run' })
+  await session.readText('/workspace/file.txt')
+  // @ts-expect-error files-only sandbox sessions do not expose exec
+  await session.exec('echo hi')
+}
+
+defineHarness()
+  .models({
+    textOnly: { provider, model: 'type-test-model', capabilities: ['text'] },
+    embeddingReady: { provider, model: 'type-test-model', capabilities: ['text', 'embeddings'] }
+  })
+  .agents(({ agent }) => ({
+    typed_models: agent({
+      model: 'textOnly',
+      input: z.string(),
+      output: z.string(),
+      instructions: 'Use typed models.',
+      handler: async (ctx) => {
+        await ctx.models.textOnly.text({ messages: [] }, ctx.signal)
+        // @ts-expect-error handler model handles only expose declared capabilities
+        await ctx.models.textOnly.embed({ input: 'hello' }, ctx.signal)
+        await ctx.models.embeddingReady.embed({ input: 'hello' }, ctx.signal)
+        return ctx.input
+      }
+    })
+  }))
+  .workflows(({ workflow }) => ({
+    typed_workflow_models: workflow({
+      input: z.string(),
+      output: z.string(),
+      handler: async (ctx) => {
+        await ctx.models.textOnly.text({ messages: [] }, ctx.signal)
+        // @ts-expect-error workflow model handles only expose declared capabilities
+        await ctx.models.textOnly.embed({ input: 'hello' }, ctx.signal)
+        await ctx.models.embeddingReady.embed({ input: 'hello' }, ctx.signal)
+        return ctx.input
+      }
+    })
+  }))

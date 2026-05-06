@@ -1,0 +1,63 @@
+name: Publish
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: github.repository == 'puristajs/harness'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Contract tests
+        run: npm run test:contracts
+
+      - name: Failure tests
+        run: npm run test:failure
+
+      - name: Verify package contents
+        run: |
+          npm pack --workspace @purista/harness --dry-run
+          npm pack --workspace @purista/harness-openai --dry-run
+
+      - name: Publish @purista/harness
+        run: npm publish --workspace @purista/harness --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @purista/harness-openai
+        run: npm publish --workspace @purista/harness-openai --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

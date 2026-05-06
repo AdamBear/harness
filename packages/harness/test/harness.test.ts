@@ -2,8 +2,8 @@ import { z } from 'zod'
 import { expect, it } from 'vitest'
 import { BaseModelProvider, InMemoryStateStore, defineHarness, inMemorySandbox, JsonLogger, OperationTimeoutError } from '../src/index.js'
 import { FakeModelProvider } from '../src/testing/fakeModelProvider.js'
-import { AgentLoopBudgetError, ModelCapabilityError, SessionBusyError } from '../src/errors/index.js'
-import type { JsonResponse } from '../src/ports/model-provider.js'
+import { AgentLoopBudgetError, HarnessConfigError, ModelCapabilityError, SessionBusyError } from '../src/errors/index.js'
+import type { ObjectResponse } from '../src/ports/model-provider.js'
 import type { HarnessAdapterContext } from '../src/ports/harness-context.js'
 
 class SlowBaseProvider extends BaseModelProvider {
@@ -11,10 +11,10 @@ class SlowBaseProvider extends BaseModelProvider {
     super({ id: 'slow', genAiSystem: 'test' })
   }
 
-  protected override async doJson(): Promise<JsonResponse> {
+  protected override async doObject<T extends import('../src/index.js').JsonValue = import('../src/index.js').JsonValue>(): Promise<ObjectResponse<T>> {
     await new Promise((resolve) => setTimeout(resolve, 50))
     return {
-      data: 'late',
+      object: 'late' as T,
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       finishReason: 'stop'
     }
@@ -31,12 +31,12 @@ class ContextAwareStateStore extends InMemoryStateStore {
 
 it('enforces maxSteps in default agent loop', async () => {
   const model = new FakeModelProvider()
-  model.enqueue({ toolCalls: [{ id: 'c1', name: 'read', arguments: { path: '/workspace/a.txt' } }], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } })
-  model.enqueue({ toolCalls: [{ id: 'c2', name: 'read', arguments: { path: '/workspace/a.txt' } }], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } })
+  model.enqueue({ object: {}, toolCalls: [{ id: 'c1', name: 'read', arguments: { path: '/workspace/a.txt' } }], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, finishReason: 'tool_calls' })
+  model.enqueue({ object: {}, toolCalls: [{ id: 'c2', name: 'read', arguments: { path: '/workspace/a.txt' } }], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, finishReason: 'tool_calls' })
 
   const harness = await defineHarness()
     .sandbox(inMemorySandbox())
-    .models({ fast: { provider: model, model: 'fake', capabilities: ['json', 'tool_use'] } })
+    .models({ fast: { provider: model, model: 'fake', capabilities: ['object', 'tool_use'] } })
     .tools({})
     .skills({})
     .agents({ a1: { model: 'fast', instructions: 'x', maxSteps: 1 } })
@@ -49,11 +49,11 @@ it('enforces maxSteps in default agent loop', async () => {
 
 it('session busy guard and memory file semantics', async () => {
   const model = new FakeModelProvider()
-  model.enqueue({ data: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } })
+  model.enqueue({ object: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, finishReason: 'stop' })
 
   const harness = await defineHarness()
     .sandbox(inMemorySandbox())
-    .models({ fast: { provider: model, model: 'fake', capabilities: ['json'] } })
+    .models({ fast: { provider: model, model: 'fake', capabilities: ['object'] } })
     .tools({})
     .skills({})
     .agents({ a1: { model: 'fast', instructions: 'x', builtinTools: false } })
@@ -79,7 +79,7 @@ it('session busy guard and memory file semantics', async () => {
 
 it('agent loop uses model capability gates', async () => {
   const model = new FakeModelProvider()
-  model.enqueue({ data: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, finishReason: 'stop' })
+  model.enqueue({ object: 'ok', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, finishReason: 'stop' })
 
   const harness = defineHarness()
     .sandbox(inMemorySandbox())
@@ -100,7 +100,7 @@ it('passes harness logger and model timeout defaults into base model providers',
     .logger(new JsonLogger({ level: 'error', out: { write: (chunk) => logs.push(chunk) } }))
     .defaults({ modelTimeoutMs: 5 })
     .sandbox(inMemorySandbox())
-    .models({ fast: { provider: new SlowBaseProvider(), model: 'fake', capabilities: ['json'] } })
+    .models({ fast: { provider: new SlowBaseProvider(), model: 'fake', capabilities: ['object'] } })
     .tools({})
     .skills({})
     .agents({ a1: { model: 'fast', input: z.string(), output: z.string(), instructions: 'x', builtinTools: false } })
@@ -114,8 +114,8 @@ it('passes harness logger and model timeout defaults into base model providers',
 
 it('passes harness context into state, sandbox, and tool adapters', async () => {
   const model = new FakeModelProvider()
-  model.enqueue({ toolCalls: [{ id: 'call-1', name: 'ctx_tool', arguments: { value: 'x' } }], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } })
-  model.enqueue({ data: 'done', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, finishReason: 'stop' })
+  model.enqueue({ object: {}, toolCalls: [{ id: 'call-1', name: 'ctx_tool', arguments: { value: 'x' } }], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, finishReason: 'tool_calls' })
+  model.enqueue({ object: 'done', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, finishReason: 'stop' })
   const state = new ContextAwareStateStore()
   let sandboxConfigured = false
   let toolConfigured = false
@@ -131,7 +131,7 @@ it('passes harness context into state, sandbox, and tool adapters', async () => 
     .logger(new JsonLogger({ level: 'fatal', out: { write: () => undefined } }))
     .state(state)
     .sandbox(sandbox)
-    .models({ fast: { provider: model, model: 'fake', capabilities: ['json', 'tool_use'] } })
+    .models({ fast: { provider: model, model: 'fake', capabilities: ['object', 'tool_use'] } })
     .tools({
       ctx_tool: {
         kind: 'ts',
@@ -158,4 +158,29 @@ it('passes harness context into state, sandbox, and tool adapters', async () => 
   expect(sandboxConfigured).toBe(true)
   expect(toolConfigured).toBe(true)
   expect(toolSawContext).toBe(true)
+})
+
+it('inspects effective adapter capabilities and validates requirements at build time', () => {
+  const model = new FakeModelProvider()
+  const harness = defineHarness({ name: 'capability-test' })
+    .sandbox(inMemorySandbox())
+    .runtime({ id: 'fake-runtime', capabilities: ['runtime.checkpoint'] })
+    .requires(['sandbox.fs', 'runtime.checkpoint'])
+    .models({ fast: { provider: model, model: 'fake', capabilities: ['object'] } })
+    .agents({ a1: { model: 'fast', input: z.string(), output: z.string(), instructions: 'x', builtinTools: false } })
+    .build()
+
+  const inspection = harness.inspect()
+  expect(inspection.name).toBe('capability-test')
+  expect(inspection.capabilities).toEqual(['sandbox.fs', 'runtime.checkpoint'])
+  expect(inspection.requiredCapabilities).toEqual(['sandbox.fs', 'runtime.checkpoint'])
+  expect(inspection.adapters.some((adapter) => adapter.kind === 'runtime' && adapter.id === 'fake-runtime')).toBe(true)
+  expect(inspection.adapters.some((adapter) => adapter.kind === 'model' && adapter.id === 'fast')).toBe(true)
+
+  expect(() => defineHarness()
+    .sandbox(inMemorySandbox())
+    .requires(['sandbox.resume'])
+    .models({ fast: { provider: model, model: 'fake', capabilities: ['object'] } })
+    .agents({ a1: { model: 'fast', input: z.string(), output: z.string(), instructions: 'x', builtinTools: false } })
+    .build()).toThrow(HarnessConfigError)
 })

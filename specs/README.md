@@ -2,7 +2,7 @@
 
 This folder is the authoritative specification for the `@purista/harness` library and its provider ecosystem. The implementation agent must read every file. No file may be skipped; no decision may be improvised beyond what is locked here.
 
-The folder contains 21 files (this README plus 20 numbered specs). The v1 published package set is exactly two packages: `@purista/harness` (the umbrella library) and `@purista/harness-openai` (the OpenAI provider). Private examples may exist under `examples/` when backed by numbered specs. Non-core packages follow the convention `@purista/harness-{addon}` if future specs approve them. Shared tool execution, including TypeScript and MCP tools, is part of the harness contract.
+The folder contains 20 files (this README plus 19 numbered specs). The v1 published package set is exactly two packages: `@purista/harness` (the umbrella library) and `@purista/harness-openai` (the OpenAI provider). Private examples may exist under `examples/` when backed by numbered specs. Non-core packages follow the convention `@purista/harness-{addon}` if future specs approve them. Shared tool execution, including TypeScript and MCP tools, is part of the harness contract.
 
 ## Reading order
 
@@ -26,8 +26,7 @@ For an implementation agent starting cold, read in this order:
 16. [15-error-catalog.md](./15-error-catalog.md) — every error class.
 17. [16-testing.md](./16-testing.md) — vitest, contract suites, gates.
 18. [17-implementation-plan.md](./17-implementation-plan.md) — ordered build phases.
-19. [18-living-wiki-jaeger-example.md](./18-living-wiki-jaeger-example.md) — runnable Hono + React/Vite example with SSE and Jaeger tracing.
-20. [19-living-wiki-intelligence-workspace.md](./19-living-wiki-intelligence-workspace.md) — next Living Wiki refactor with full MCP support.
+19. [18-living-wiki-jaeger-example.md](./18-living-wiki-jaeger-example.md) — canonical Living Wiki intelligence workspace with direct agents, workflows, HITL review, artifacts, MCP, SSE, and Jaeger tracing.
 
 ## File index (one-liners)
 
@@ -51,8 +50,7 @@ For an implementation agent starting cold, read in this order:
 | [15-error-catalog.md](./15-error-catalog.md) | Every error class, code, category, retriable, meta. |
 | [16-testing.md](./16-testing.md) | Vitest, contract suites, fakes, coverage gates. |
 | [17-implementation-plan.md](./17-implementation-plan.md) | Phased build order with exit criteria. |
-| [18-living-wiki-jaeger-example.md](./18-living-wiki-jaeger-example.md) | Full living-wiki example contract covering Hono, React/Vite, OpenAI, SSE, and Jaeger. |
-| [19-living-wiki-intelligence-workspace.md](./19-living-wiki-intelligence-workspace.md) | Research workspace refactor, executable MCP support, draw.io artifacts, and human review workflows. |
+| [18-living-wiki-jaeger-example.md](./18-living-wiki-jaeger-example.md) | Canonical living-wiki intelligence workspace contract covering Hono, React/Vite, OpenAI, direct agents, workflows, HITL review, artifacts, MCP, SSE, and Jaeger. |
 
 ## Authoritative anchors
 

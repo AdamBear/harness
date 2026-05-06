@@ -7,6 +7,8 @@ It demonstrates:
 
 - direct agent chat through `session.agents`, where an agent is the typed LLM
   conversation loop with model calls and tool invocations;
+- structured object outputs for reports, review requests, graph highlights,
+  and JSON-rendered panels;
 - optional workflows through `session.workflows`, where workflows orchestrate
   multiple agent invocations, review gates, artifacts, and wiki mutations;
 - source upload and file-backed wiki pages;
@@ -149,6 +151,10 @@ Workflow outputs can include:
 - draw.io XML with an “Open” link to diagrams.net;
 - JSON panel specs rendered through `json-renderer`;
 - graph highlights for the Three.js knowledge graph.
+
+These artifacts are produced from typed object outputs and deterministic
+workflow code. The example observes runs with harness `RunEvent` values over
+SSE; it does not depend on a provider-specific stream protocol.
 
 The app works without draw.io MCP. It generates local Mermaid and draw.io XML
 fallback artifacts by default.

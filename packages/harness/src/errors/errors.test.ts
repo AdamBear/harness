@@ -14,15 +14,18 @@ import {
 
 describe('HarnessError', () => {
   it('serializes with toJSON', () => {
-    const err = new HarnessConfigError('bad config', { reason: 'bad' })
+    const cause = new Error('cause includes secret-token')
+    const err = new InternalError('bad config', { reason: 'bad', apiKey: 'sk_live_secret' }, cause)
     expect(err.toJSON()).toMatchObject({
-      name: 'HarnessConfigError',
-      code: 'HARNESS_CONFIG_ERROR',
-      category: 'config',
+      name: 'InternalError',
+      code: 'INTERNAL_ERROR',
+      category: 'internal',
       retriable: false,
       message: 'bad config',
-      meta: { reason: 'bad' }
+      meta: { reason: 'bad', apiKey: '[redacted]' }
     })
+    expect(err.toJSON()).not.toHaveProperty('cause')
+    expect(err.toJSON()).not.toHaveProperty('stack')
   })
 
   it('isHarnessError narrows catalog errors', () => {

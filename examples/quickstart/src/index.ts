@@ -42,7 +42,7 @@ export function createQuickstartHarness(provider?: ModelProvider) {
       assistant: {
         provider: modelProvider,
         model,
-        capabilities: ['json']
+        capabilities: ['object']
       }
     })
     .agents(({ agent }) => ({

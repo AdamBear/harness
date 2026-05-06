@@ -1,3 +1,5 @@
+import { sanitizeMeta } from './redaction.js'
+
 /**
  * Canonical harness error categories.
  *
@@ -69,9 +71,7 @@ export class HarnessError extends Error {
       category: this.category,
       retriable: this.retriable,
       message: this.message,
-      meta: this.meta,
-      cause: this.cause,
-      stack: this.stack
+      ...(this.meta ? { meta: sanitizeMeta(this.meta) } : {})
     }
   }
 }
@@ -90,13 +90,21 @@ export function serializeError(error: unknown): {
   meta?: Record<string, unknown>
 } {
   if (error instanceof HarnessError) {
-    return {
+    const serialized: {
+      code: string
+      category: string
+      retriable: boolean
+      message: string
+      meta?: Record<string, unknown>
+    } = {
       code: error.code,
       category: error.category,
       retriable: error.retriable,
-      message: error.message,
-      ...(error.meta ? { meta: error.meta } : {})
+      message: error.message
     }
+    const meta = sanitizeMeta(error.meta)
+    if (meta) serialized.meta = meta
+    return serialized
   }
 
   return {

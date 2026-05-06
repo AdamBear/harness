@@ -3,10 +3,11 @@ import path from 'node:path'
 import { OperationCancelledError, OperationTimeoutError, HarnessConfigError, SandboxError, SandboxNoExecutorError } from '../errors/index.js'
 import type { DirEntry, ExecOptions, ExecResult, FileStat } from '../harness/types.js'
 import type { HarnessAdapterContext } from '../ports/harness-context.js'
+import type { AdapterCapabilities, AdapterCapability } from '../ports/capabilities.js'
 
 const require = createRequire(import.meta.url)
 
-export interface SandboxSession {
+export interface SandboxSessionBase {
   read(path: string): Promise<Uint8Array>
   readText(path: string, encoding?: 'utf-8'): Promise<string>
   write(path: string, data: Uint8Array | string): Promise<void>
@@ -16,13 +17,91 @@ export interface SandboxSession {
   exists(path: string): Promise<boolean>
   mount(files: ReadonlyMap<string, Uint8Array | string>, atPath: string): Promise<void>
   readonly executor: 'available' | 'unavailable'
-  exec(command: string, opts?: ExecOptions): Promise<ExecResult>
   close(): Promise<void>
 }
 
-export interface Sandbox {
+export interface ExecCapableSandboxSession extends SandboxSessionBase {
+  readonly executor: 'available'
+  exec(command: string, opts?: ExecOptions): Promise<ExecResult>
+}
+
+export type SandboxSession = SandboxSessionBase & {
+  exec(command: string, opts?: ExecOptions): Promise<ExecResult>
+}
+
+type HasSandboxCapability<C extends readonly AdapterCapability[], K extends AdapterCapability> = K extends C[number] ? true : false
+
+export type SandboxSessionFor<C extends readonly AdapterCapability[]> =
+  HasSandboxCapability<C, 'sandbox.exec'> extends true
+    ? ExecCapableSandboxSession
+    : SandboxSessionBase & { readonly executor: 'unavailable' }
+
+export interface Sandbox<C extends readonly AdapterCapability[] = readonly AdapterCapability[]> extends Partial<AdapterCapabilities> {
+  readonly capabilities?: C
   configureHarnessContext?(context: HarnessAdapterContext): void
-  open(opts: { sessionId: string; runId: string; signal?: AbortSignal }): Promise<SandboxSession>
+  open(opts: { sessionId: string; runId: string; signal?: AbortSignal }): Promise<SandboxSessionFor<C>>
+}
+
+/** Result produced when a sandbox adapter records a restorable checkpoint. */
+export interface SnapshotResult {
+  /** Adapter-owned id used to resume the checkpoint later. */
+  readonly snapshotId: string
+  /** Optional adapter metadata for observability or persistence records. */
+  readonly metadata?: Record<string, unknown>
+}
+
+/** Options used to open a sandbox session from a prior snapshot. */
+export interface SandboxResumeOptions {
+  /** Snapshot id previously returned by `snapshot(...)` or `hibernate(...)`. */
+  readonly snapshotId: string
+  /** Logical harness session id for the resumed sandbox session. */
+  readonly sessionId: string
+  /** Harness run id requesting the resumed sandbox session. */
+  readonly runId: string
+  /** Optional cancellation signal for adapters that support abortable resume. */
+  readonly signal?: AbortSignal
+}
+
+/**
+ * Optional sandbox capability for creating durable session snapshots.
+ *
+ * @example
+ * ```ts
+ * if ('snapshot' in sandbox) {
+ *   const result = await sandbox.snapshot(session)
+ * }
+ * ```
+ */
+export interface SnapshotCapableSandbox {
+  snapshot(session: SandboxSession): Promise<SnapshotResult>
+}
+
+/**
+ * Optional sandbox capability for opening sessions from durable snapshots.
+ *
+ * @example
+ * ```ts
+ * if ('resume' in sandbox) {
+ *   const session = await sandbox.resume({ snapshotId, sessionId, runId })
+ * }
+ * ```
+ */
+export interface ResumeCapableSandbox {
+  resume(opts: SandboxResumeOptions): Promise<SandboxSession>
+}
+
+/**
+ * Optional sandbox capability for snapshotting and releasing active compute.
+ *
+ * @example
+ * ```ts
+ * if ('hibernate' in sandbox) {
+ *   const result = await sandbox.hibernate(session)
+ * }
+ * ```
+ */
+export interface HibernateCapableSandbox {
+  hibernate(session: SandboxSession): Promise<SnapshotResult>
 }
 
 type Node = { kind: 'file'; data: Uint8Array; modifiedAt: string } | { kind: 'directory'; modifiedAt: string }
@@ -119,13 +198,16 @@ class MemorySandboxSession implements SandboxSession {
   async close(): Promise<void> {}
 }
 
-export function inMemorySandbox(): Sandbox {
+export function inMemorySandbox(): Sandbox<readonly ['sandbox.fs']> {
   return {
-    async open() { return new MemorySandboxSession('unavailable') }
+    capabilities: ['sandbox.fs'],
+    async open() {
+      return new MemorySandboxSession('unavailable') as SandboxSessionFor<readonly ['sandbox.fs']>
+    }
   }
 }
 
-export function bashSandbox(opts?: { network?: { allow?: string[]; deny?: string[] }; executionLimits?: { wallClockMs?: number; memoryMb?: number }; python?: boolean }): Sandbox {
+export function bashSandbox(opts?: { network?: { allow?: string[]; deny?: string[] }; executionLimits?: { wallClockMs?: number; memoryMb?: number }; python?: boolean }): Sandbox<readonly ['sandbox.fs', 'sandbox.exec']> {
   let justBash: any
   try {
     justBash = require('just-bash')
@@ -134,6 +216,7 @@ export function bashSandbox(opts?: { network?: { allow?: string[]; deny?: string
   }
 
   return {
+    capabilities: ['sandbox.fs', 'sandbox.exec'],
     async open() {
       const engine = justBash.createSandbox ? await justBash.createSandbox(opts) : new justBash.Bash({ ...opts, cwd: '/workspace' })
       const exec = async (command: string, execOpts?: ExecOptions): Promise<ExecResult> => {
@@ -178,12 +261,12 @@ export function bashSandbox(opts?: { network?: { allow?: string[]; deny?: string
           if (abortListener) sourceSignal?.removeEventListener?.('abort', abortListener)
         }
       }
-      return new MemorySandboxSession('available', exec)
+      return new MemorySandboxSession('available', exec) as SandboxSessionFor<readonly ['sandbox.fs', 'sandbox.exec']>
     }
   }
 }
 
-export function autoDetectSandbox(): Sandbox {
+export function autoDetectSandbox(): Sandbox<any> {
   try {
     return bashSandbox()
   } catch {

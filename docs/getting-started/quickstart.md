@@ -75,8 +75,8 @@ sequenceDiagram
   App->>Session: harness.getSession("quickstart")
   App->>Workflow: session.workflows.explain_quickstart.prompt(input)
   Workflow->>Agent: ctx.agents.assistant(input)
-  Agent->>Model: json request
-  Model-->>Agent: validated JSON
+  Agent->>Model: object request
+  Model-->>Agent: validated object
   Agent-->>Workflow: typed output
   Workflow-->>App: typed output
 ```

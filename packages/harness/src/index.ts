@@ -3,6 +3,26 @@ export * from './logger/index.js'
 export * from './telemetry/index.js'
 export * from './ulid/index.js'
 export * from './ports/index.js'
+export {
+  createDurableWorkflowContext,
+  DurableStepError,
+  DurableRunLeaseError,
+  DurableTerminalRunError,
+  inMemoryDurableRuntime,
+  isTerminalRunStatus
+} from './runtime/index.js'
+export type {
+  DurableActiveRunStatus,
+  DurableWorkflowContext,
+  DurableRunLease,
+  DurableRunStart,
+  DurableRunStatus,
+  DurableRuntime,
+  DurableTerminalRunStatus,
+  FinishRunPatch,
+  InMemoryDurableRuntimeOptions,
+  RunCheckpoint
+} from './runtime/index.js'
 export * from './state/in-memory.js'
 export * from './models/json.js'
 export type { SessionRecord, Message, RunRecord, PersistedRunEvent, RunStatus } from './models/state.js'

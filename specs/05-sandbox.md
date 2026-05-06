@@ -5,13 +5,13 @@ The Sandbox port abstracts an isolated filesystem and shell execution backend. v
 ## Port interface
 
 ```ts
-interface Sandbox {
+interface Sandbox<C extends readonly AdapterCapability[] = readonly AdapterCapability[]> {
+  readonly capabilities?: C
   configureHarnessContext?(context: HarnessAdapterContext): void
-  open(opts: { sessionId: string; runId: string; signal?: AbortSignal }): Promise<SandboxSession>
+  open(opts: { sessionId: string; runId: string; signal?: AbortSignal }): Promise<SandboxSessionFor<C>>
 }
 
-interface SandboxSession {
-  // Filesystem (always available)
+interface SandboxSessionBase {
   read(path: string): Promise<Uint8Array>
   readText(path: string, encoding?: 'utf-8'): Promise<string>
   write(path: string, data: Uint8Array | string): Promise<void>
@@ -20,13 +20,19 @@ interface SandboxSession {
   stat(path: string): Promise<FileStat>
   exists(path: string): Promise<boolean>
   mount(files: ReadonlyMap<string, Uint8Array | string>, atPath: string): Promise<void>
-
-  // Execution (may not be available — see executor)
   readonly executor: 'available' | 'unavailable'
-  exec(command: string, opts?: ExecOptions): Promise<ExecResult>
-
   close(): Promise<void>
 }
+
+interface ExecCapableSandboxSession extends SandboxSessionBase {
+  readonly executor: 'available'
+  exec(command: string, opts?: ExecOptions): Promise<ExecResult>
+}
+
+type SandboxSessionFor<C extends readonly AdapterCapability[]> =
+  'sandbox.exec' extends C[number]
+    ? ExecCapableSandboxSession
+    : SandboxSessionBase & { readonly executor: 'unavailable' }
 
 interface ExecOptions {
   cwd?: string
@@ -46,34 +52,64 @@ harness, not separately on every sandbox adapter.
 
 ## Locked behaviors
 
-- **No capability enum.** The Sandbox port replaces the previous `SandboxCapability` enum entirely. Each backend (just-bash, Docker, microVM, cloud) declares its own policy internally; the harness trusts the backend.
+- **Capabilities are policy.** Each sandbox declares the behavior the harness and user code may rely on. `inMemorySandbox()` exposes no `exec` method on its precise session type because it declares only `sandbox.fs`. `bashSandbox()` declares `sandbox.exec` and opens sessions with `exec`.
 - **Path semantics.** All paths are POSIX style, absolute (must start with `/`). Implementations validate and normalize. Relative paths throw `SandboxError{reason:'invalid_path'}`.
 - **Reserved paths inside the sandbox** (locked, conventions enforced by the harness, not the backend):
   - `/skills/<id>/...` — skill mounts; read-only by convention.
   - `/memory/<key>.json` — session memory KV.
   - `/workspace/` — free model scratch; default `cwd` for `exec`.
 - **Timeouts.** `exec` honors `opts.timeoutMs` (default `defaults.toolTimeoutMs`); on timeout throws `OperationTimeoutError{scope:'sandbox_run'}`.
-- **`executor === 'unavailable'`.** Indicates this sandbox session has no shell executor (default fallback when `just-bash` peer dep is missing). Calling `exec` throws `SandboxNoExecutorError`. The built-in tool registry must check this and disable `bash` automatically; see [07-tools](./07-tools.md) §"Built-in tools".
+- **`executor === 'unavailable'`.** Indicates this sandbox session has no shell executor. Precise files-only session types do not expose `exec`; dynamically widened sessions that still call `exec` fail with `SandboxNoExecutorError`. The built-in tool registry checks this and disables `bash` automatically; see [07-tools](./07-tools.md) §"Built-in tools".
 
 ## Default sandbox
 
 The harness ships **two** default sandbox factories in core. Both are exported from `@purista/harness`.
 
-1. `inMemorySandbox()` — files-only (`executor: 'unavailable'`). Pure TS, no peer deps. `read`/`write`/`list`/`stat`/`mount` work; `exec` throws `SandboxNoExecutorError`.
-2. `bashSandbox(opts?)` — wraps the `just-bash` peer dep. Full bash emulator + in-memory POSIX FS. `executor: 'available'`. Optional `opts`:
+1. `inMemorySandbox()` — files-only, declares `['sandbox.fs']`, opens `executor: 'unavailable'` sessions. Pure TS, no peer deps. `read`/`write`/`list`/`stat`/`mount` work.
+2. `bashSandbox(opts?)` — wraps the `just-bash` peer dep, declares `['sandbox.fs','sandbox.exec']`. Full bash emulator + in-memory POSIX FS. `executor: 'available'`. Optional `opts`:
    - `network?: { allow?: string[]; deny?: string[] }` — default deny all. Maps to just-bash network config.
    - `executionLimits?: { wallClockMs?: number; memoryMb?: number }` — passed through to just-bash.
    - `python?: false` (default) | `true` — enable just-bash python3 builtin if peer dep allows.
 
 If `just-bash` is not installed and the user calls `bashSandbox()`, throw `HarnessConfigError{reason:'just_bash_not_installed'}` synchronously at construction time.
 
+## Optional durable sandbox capabilities
+
+Sandbox adapters may add snapshot/resume methods behind declared capabilities:
+
+```ts
+interface SnapshotResult {
+  snapshotId: string
+  metadata?: Record<string, JsonValue>
+}
+
+interface SandboxResumeOptions {
+  snapshotId: string
+  sessionId: string
+  runId: string
+  signal?: AbortSignal
+}
+
+interface SnapshotCapableSandbox {
+  snapshot(session: SandboxSessionBase): Promise<SnapshotResult>
+}
+interface ResumeCapableSandbox {
+  resume(opts: SandboxResumeOptions): Promise<SandboxSessionBase>
+}
+interface HibernateCapableSandbox {
+  hibernate(session: SandboxSessionBase): Promise<SnapshotResult>
+}
+```
+
+`sandbox.snapshot`, `sandbox.resume`, `sandbox.hibernate`, and `sandbox.persistent_fs` are opt-in adapter capabilities. Harness construction fails early when `.requires(...)` names a capability the configured adapters do not provide.
+
 ### Auto-detect
 
 If the user calls `.sandbox()` with no argument or omits `.sandbox()` entirely, the harness auto-detects: tries `bashSandbox()` first, falls back to `inMemorySandbox()` on import failure. This auto-detect is locked in [02-harness-config](./02-harness-config.md) §`.sandbox(...)`.
 
-## Adapters (future, not v1)
+## Adapters
 
-Future packages like `@purista/harness-sandbox-docker`, `@purista/harness-sandbox-e2b`, `@purista/harness-sandbox-microvm` will implement the same `Sandbox` port. Out of scope for v1.
+Packages like `@purista/harness-sandbox-docker`, `@purista/harness-sandbox-e2b`, and `@purista/harness-sandbox-microvm` implement the same capability-declared `Sandbox` port.
 
 ## Cross-references
 

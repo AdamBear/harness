@@ -1,7 +1,7 @@
 {
   "name": "@purista/harness",
-  "version": "0.0.0",
-  "private": true,
+  "version": "1.0.0",
+  "description": "Self-hosted enterprise agent harness for typed tools, agents, workflows, state, sandboxing, and telemetry.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,8 +15,30 @@
       "import": "./dist/testing/index.js"
     }
   },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/puristajs/harness.git",
+    "directory": "packages/harness"
+  },
+  "bugs": {
+    "url": "https://github.com/puristajs/harness/issues"
+  },
+  "homepage": "https://github.com/puristajs/harness#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:types": "tsc -p tsconfig.type-tests.json",
     "test": "vitest run",
@@ -26,20 +48,25 @@
     "test:failure": "vitest run test/failure"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "zod": "^4.4.3"
   },
   "peerDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@opentelemetry/api": "^1.9.1",
     "just-bash": "^2.14.4"
   },
   "peerDependenciesMeta": {
+    "@modelcontextprotocol/sdk": {
+      "optional": true
+    },
     "just-bash": {
       "optional": true
     }
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@opentelemetry/context-async-hooks": "^2.7.1",
     "@types/node": "^25.6.0",
     "just-bash": "^2.14.4",
     "typescript": "^6.0.3",

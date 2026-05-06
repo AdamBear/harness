@@ -10,7 +10,7 @@ describe('harness cancellation propagation', () => {
     const model = {
       id: 'fake',
       genAiSystem: 'fake',
-      async json(req: { signal: AbortSignal }) {
+      async object(req: { signal: AbortSignal }) {
         return new Promise((_resolve, reject) => {
           req.signal.addEventListener('abort', () => reject(req.signal.reason), { once: true })
         })
@@ -18,7 +18,7 @@ describe('harness cancellation propagation', () => {
     }
     const harness = defineHarness()
       .sandbox(inMemorySandbox())
-      .models({ fast: { provider: model, model: 'fake', capabilities: ['json'] } })
+      .models({ fast: { provider: model, model: 'fake', capabilities: ['object'] } })
       .tools({})
       .skills({})
       .agents({ a1: { model: 'fast', input: z.string(), output: z.string(), instructions: 'x', builtinTools: false } })

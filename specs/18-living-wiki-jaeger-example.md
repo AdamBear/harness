@@ -1,84 +1,66 @@
-# Living Wiki Jaeger Example
+# Living Wiki Intelligence Workspace
 
-**Purpose.** Defines the complete implementation contract for
-`examples/living-wiki-jaeger`: a runnable Hono + React/Vite example that shows
-the full harness flow with OpenAI, typed tools, one local skill, typed agents,
-typed workflows, sessions, SSE live observation, and Jaeger/OpenTelemetry
-tracing.
+**Purpose.** Defines the current canonical contract for
+`examples/living-wiki-jaeger`: a runnable Hono + React/Vite research workspace
+that demonstrates `@purista/harness`, `@purista/harness-openai`, typed tools,
+skills, agents, workflows, direct agent streaming, human review, local
+artifacts, optional MCP graphics, SSE observation, and OpenTelemetry tracing
+with Jaeger.
 
-The example is a local "living wiki" or memex application. It is an example of
-the harness as lower-level enterprise agent infrastructure, not a hosted SaaS
-product.
+This spec consolidates the former Living Wiki Jaeger example baseline and the
+later intelligence-workspace/MCP refactor into one current-state contract.
 
 ## Package
 
 - Workspace path: `examples/living-wiki-jaeger`.
 - Package name: `@purista/living-wiki-jaeger-example`.
-- Package type: private ESM TypeScript package.
-- Required scripts:
-  - `dev` starts the API and web client together.
-  - `dev:api` starts the Hono backend.
-  - `dev:web` starts the Vite React client.
-  - `build` builds the API and web client.
-  - `typecheck` runs TypeScript without emitting files.
-  - `test` runs unit and API/integration tests that do not call OpenAI.
-  - `test:ui` runs browser/UI tests against the fake-provider mode.
-  - `jaeger` starts Jaeger 2.17 in memory with Docker.
+- Package visibility: private.
+- Runtime: Node 20+.
+- Backend: Hono.
+- Frontend: React + Vite.
+- Styling/components: project-local React components; AI Elements patterns for
+  chat; shadcn-compatible controls where useful.
+- Model provider: `@purista/harness-openai` for real runs, fake provider for
+  default tests.
 
-The example package MUST be included by the root `examples/*` workspace pattern
-and MUST NOT require changes to root workspace discovery.
+The example imports harness runtime APIs only from `@purista/harness` and model
+adapter APIs only from `@purista/harness-openai`.
 
-## Environment
+## Runtime Defaults
 
-The example reads environment variables from the repository-root `.env` file.
-It MUST NOT read an example-local `.env` file.
+Default startup must not require OpenAI, draw.io MCP, or Jaeger.
 
-Required for real OpenAI runs:
+Environment variables:
 
-```env
-OPENAI_API_KEY=
-```
+| Variable | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | Enables real OpenAI model calls. |
+| `OPENAI_MODEL` | Optional override, default `gpt-5-mini`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional trace exporter endpoint, default `http://localhost:4318/v1/traces`. |
+| `LIVING_WIKI_DRAWIO_MCP_COMMAND` | Optional draw.io MCP stdio integration. |
+| `LIVING_WIKI_DRAWIO_MCP_ARGS` | Optional draw.io MCP stdio args. |
+| `LIVING_WIKI_DRAWIO_MCP_URL` | Optional draw.io MCP HTTP integration. |
+| `LIVING_WIKI_DRAWIO_MCP_AUTH_TOKEN` | Optional bearer token for draw.io MCP HTTP. |
 
-Defaults and optional configuration:
+When optional variables are absent:
 
-```env
-OPENAI_MODEL=gpt-5-mini
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-```
+- model calls use a deterministic fake provider in tests and demo-safe local
+  fallback behavior where applicable;
+- draw.io MCP is disabled and Mermaid/Three.js remain available;
+- tracing runs as no-op or exports only when configured;
+- no OpenAI network call is made by default tests.
 
-Automated tests MUST use fake model providers and MUST NOT make OpenAI network
-calls. Tests that need real OpenAI credentials are manual verification only and
-MUST be skipped by default.
+## Repository Boundaries
 
-## Architecture
+| Area | Owner path | Responsibility |
+|---|---|---|
+| Harness MCP runtime | `packages/harness/src/tools/mcp/**` | MCP stdio/http tool execution, schema validation, lifecycle, telemetry, errors |
+| Example backend | `examples/living-wiki-jaeger/src/backend/**` | Hono API, local file data, workflow definitions, direct agent routes, artifact storage, example tools |
+| Example frontend | `examples/living-wiki-jaeger/src/frontend/**` | React UI, AI Elements chat, markdown/Mermaid rendering, graph, drawers, review forms |
+| Example skills | `examples/living-wiki-jaeger/skills/**` | skill manifests and instruction content used by agents |
+| Docs | `docs/**`, `examples/living-wiki-jaeger/README.md` | usage, operations, scenarios, MCP setup, migration guide |
 
-The backend is Hono. The frontend is React + Vite. The preferred local dev mode
-is Vite serving the browser client and proxying `/api` and `/events` requests to
-the Hono backend. If a single Hono + React stack is used, it MUST preserve the
-same API, SSE, build, and test behavior.
-
-Hono owns:
-
-- harness creation
-- OpenTelemetry setup
-- workflow invocation
-- run lookup and cancellation
-- SSE live event streams
-- file-backed source/wiki data access
-- API input validation and error responses
-
-React owns:
-
-- the Obsidian-like app shell
-- page/source viewing and editing
-- workflow forms
-- conversation and run-progress UI
-- SSE subscription and reconnect state
-- structured report rendering
-
-The UI MUST use AI Elements for the conversation/run interaction surface, shadcn
-components for layout and controls, and `json-renderer` for structured workflow
-reports and generated panel specs.
+MCP runtime support belongs in `@purista/harness`, not as example-only code.
 
 ## Data Model
 
@@ -86,149 +68,320 @@ All example data is local file data under `examples/living-wiki-jaeger/data`.
 
 Required directories:
 
-- `data/raw/sources`
-- `data/wiki`
-
-Required seed files:
-
-- `data/wiki/index.md`
-- `data/wiki/log.md`
-- at least three concept pages under `data/wiki`
-- at least three source markdown files under `data/raw/sources`
-
-Slugs are lowercase URL-safe names matching:
-
 ```text
-^[a-z0-9][a-z0-9-]{0,79}$
+data/
+  sources/
+  wiki/
+  runs/
+  artifacts/
 ```
 
-Every API and tool that accepts a slug MUST validate it before file access.
-Resolved paths MUST stay inside the expected data directory after normalization.
-Invalid slugs or escaped paths fail before reading or writing files.
+Wiki pages are markdown files with frontmatter:
 
-Markdown page links use wiki-link syntax:
-
-```text
-[[page-slug]]
+```yaml
+---
+id: page-id
+title: Page Title
+summary: Short summary
+tags: [example]
+updatedAt: 2026-05-06T00:00:00.000Z
+---
 ```
 
-Backlink detection scans wiki markdown pages for that exact syntax.
+Source files are markdown files with frontmatter:
+
+```yaml
+---
+id: source-id
+title: Source Title
+kind: markdown
+createdAt: 2026-05-06T00:00:00.000Z
+---
+```
+
+Rules:
+
+- slugs are lowercase URL-safe identifiers;
+- callers cannot choose filesystem paths;
+- all reads/writes stay under the example data directory;
+- path traversal is rejected before sandbox/file access;
+- destructive edits require an explicit tool call or approved review decision.
 
 ## Harness Definition
 
-The example MUST explicitly demonstrate this mental model in code:
+The backend builds one harness using:
 
-```text
-define -> harness -> agent -> workflow -> session -> invoke
-```
+- `defineHarness()`;
+- an in-memory or local-file state store suitable for the example;
+- a local sandbox rooted at the example workspace;
+- the OpenAI provider when `OPENAI_API_KEY` is present;
+- fake provider scripts for tests;
+- built-in tools only when allowlisted by agents;
+- local TypeScript tools for wiki operations;
+- optional MCP tools only when configured.
 
-The harness definition MUST include:
+The default model alias is `main`. The default real model is `gpt-5-mini`.
 
-- `defineHarness`
-- the OpenAI adapter from `@purista/harness-openai`
-- typed tools with Zod input and output schemas
-- one local skill mounted from `skills/wiki-curator`
-- typed agents
-- typed workflows
-- session creation
-- `prompt` execution
-- live observation through SSE
+Privacy defaults:
 
-The model registry MUST include alias `wiki_model`:
+- telemetry content capture is disabled by default;
+- run events are sanitized before SSE and persistence;
+- validation errors identify invalid fields without echoing confidential payload
+  content;
+- tool/model/provider logs never include API keys, auth headers, token values,
+  uploaded source content, prompts, or raw model outputs unless an explicitly
+  documented content-capture mode allows safe non-secret payload capture.
 
-```ts
-{
-  provider: openai({ apiKey }),
-  model: process.env.OPENAI_MODEL ?? 'gpt-5-mini',
-  capabilities: ['text', 'json', 'tool_use']
-}
-```
+## Local Tools
 
-The default example config MUST keep telemetry privacy-safe. It MUST NOT set
-`telemetry.captureContent` unless a developer explicitly edits the example for
-diagnostics.
+The example defines TypeScript tools with Zod input/output schemas.
 
-Logger and telemetry propagation MUST come from the harness context. Example
-tools, sandbox/state usage, and providers MUST NOT require the user to pass
-logger or telemetry objects into each adapter or tool manually.
-
-## Tools
-
-The example MUST define these typed tools. Each tool has a Zod input schema, a
-Zod output schema, safe operational logging through the provided tool context,
-and no direct OpenTelemetry setup of its own.
-
-| Tool | Behavior |
-|------|----------|
-| `read_source` | Reads one source markdown file by slug from `data/raw/sources`. |
-| `search_wiki` | Searches wiki page titles and content; returns ranked page refs and snippets. |
-| `read_wiki_page` | Reads one wiki page by slug from `data/wiki`. |
-| `write_wiki_page` | Creates or replaces one wiki page after slug/path validation. |
-| `append_log` | Appends a timestamped operational entry to `data/wiki/log.md`. |
-| `list_backlinks` | Lists wiki pages linking to a slug with `[[slug]]`. |
-| `render_panel_spec` | Validates and returns a JSON-renderer-compatible panel spec. |
-
-Tool outputs MUST be structured JSON. Tool errors MUST be safe to expose through
-run events and API responses and MUST NOT include raw file content except where
-the tool contract explicitly returns page/source content.
-
-## Skill
-
-The example MUST include `skills/wiki-curator/SKILL.md`.
-
-The skill MUST instruct the agent to:
-
-- keep pages compact and linked
-- preserve source references
-- separate claims from open questions
-- avoid overwriting unrelated page content
-- append meaningful updates to `log.md`
-- prefer small page edits over large rewrites
-- keep markdown output readable without custom extensions beyond wiki links
-
-The skill is part of the example contract and MUST be mounted by the wiki agent.
-
-## Agents
-
-At minimum, define one typed agent, `wiki_curator`, using model alias
-`wiki_model`, the `wiki-curator` skill, and the tools listed above.
-
-The agent MUST have typed inputs and outputs for each workflow-facing use. It may
-be implemented as one agent with workflow-specific schemas or as a small set of
-focused agents, but all model calls MUST route through the harness model
-registry and capability layer.
-
-The agent loop MUST keep the default harness behavior: no custom planner, no
-over-general orchestration, and no bypass of provider capability checks.
-
-## Workflows
-
-The example MUST implement these five typed workflows. Workflow handlers MUST
-infer `ctx.input` without casts.
-
-### `ingest_source`
+### `list_wiki_pages`
 
 Input:
 
 ```ts
-{ sourceSlug: string }
+{ tag?: string }
 ```
 
 Output:
 
 ```ts
 {
-  updatedPages: string[]
-  extractedConcepts: string[]
-  followUpQuestions: string[]
+  pages: Array<{
+    slug: string
+    title: string
+    summary: string
+    tags: string[]
+    updatedAt: string
+  }>
 }
 ```
 
-Behavior: reads the source, uses the agent and tools to extract concepts,
-claims, links, and follow-up questions, writes or updates wiki pages, and appends
-a log entry.
+### `read_wiki_page`
 
-### `ask_wiki`
+Input:
+
+```ts
+{ slug: string }
+```
+
+Output:
+
+```ts
+{
+  slug: string
+  title: string
+  frontmatter: Record<string, unknown>
+  markdown: string
+}
+```
+
+### `write_wiki_page`
+
+Input:
+
+```ts
+{
+  slug: string
+  title: string
+  summary: string
+  tags: string[]
+  markdown: string
+}
+```
+
+Output:
+
+```ts
+{ slug: string; updatedAt: string }
+```
+
+### `search_sources`
+
+Input:
+
+```ts
+{ query: string; limit?: number }
+```
+
+Output:
+
+```ts
+{
+  results: Array<{
+    slug: string
+    title: string
+    excerpt: string
+  }>
+}
+```
+
+### `append_research_log`
+
+Input:
+
+```ts
+{
+  message: string
+  refs: string[]
+}
+```
+
+Output:
+
+```ts
+{ entryId: string; createdAt: string }
+```
+
+### `store_artifact`
+
+Input:
+
+```ts
+{
+  kind: ArtifactManifest['kind']
+  title: string
+  contentType: string
+  content: string
+  sourcePageIds?: string[]
+  renderMode?: ArtifactManifest['renderMode']
+}
+```
+
+Output:
+
+```ts
+ArtifactManifest
+```
+
+The tool rejects unsupported artifact kinds, path traversal, oversized payloads,
+and unsafe SVG content.
+
+## Skills
+
+Skills are mounted through the harness skill system. They must not be inlined
+into workflow handlers.
+
+Required skills:
+
+- `wiki-curator`: compact linked wiki maintenance and citation discipline.
+- `research-brief-writer`: report structure, Mermaid guidance, open-question
+  handling, and confidence language.
+- `diagram-designer`: converts research structure into Mermaid or draw.io-ready
+  artifact instructions.
+- `decision-memo-planner`: evaluation criteria, evidence needs, and options.
+- `reflective-critic`: checks drafts for missing evidence, contradictions,
+  unsupported claims, and bias.
+- `judge-rubric`: produces structured `JudgeRubric` output.
+
+## Shared Output Contracts
+
+```ts
+interface EvidenceItem {
+  ref: string
+  title: string
+  quote?: string
+  relevance: string
+}
+
+interface JudgeRubric {
+  score: number
+  confidence: 'low' | 'medium' | 'high'
+  strengths: string[]
+  risks: string[]
+  missingEvidence: string[]
+}
+
+interface ReviewRequest {
+  id: string
+  runId: string
+  title: string
+  reason: string
+  proposedChanges: ProposedPageChange[]
+  contradictions: Contradiction[]
+  alternatives: Array<{ id: string; label: string; description: string }>
+}
+```
+
+```ts
+interface ProposedPageChange {
+  id: string
+  kind: 'create_page' | 'update_page' | 'merge_pages' | 'add_citation' | 'mark_stale'
+  targetPageId?: string
+  title: string
+  beforeMarkdown?: string
+  afterMarkdown?: string
+  rationale: string
+  citations: CitationChange[]
+  risk: 'low' | 'medium' | 'high'
+}
+
+interface CitationChange {
+  id: string
+  pageId: string
+  sourceRef: string
+  claim: string
+  operation: 'add' | 'update' | 'remove'
+}
+
+interface Contradiction {
+  id: string
+  claimA: string
+  claimB: string
+  refs: string[]
+  severity: 'low' | 'medium' | 'high'
+}
+
+interface ReviewOutcome {
+  reviewRequestId: string
+  runId: string
+  status: 'applied' | 'rejected' | 'revision_started'
+  appliedChangeIds: string[]
+  followUpRunId?: string
+  logEntryId: string
+}
+```
+
+## Agents
+
+Required agents:
+
+- `wiki_answerer`: reads wiki pages and sources, answers direct chat questions,
+  cites local refs, and may return typed panels/artifacts.
+- `page_curator`: improves one wiki page at a time and must write only through
+  `write_wiki_page`.
+- `source_extractor`: reads selected sources and proposes page changes,
+  citations, contradictions, and open questions.
+- `research_synthesizer`: produces briefs and structured panels from selected
+  pages/sources.
+- `diagram_designer`: produces Mermaid or draw.io-ready artifact instructions.
+- `critic`: reflects on drafts and identifies unsupported claims, contradictions,
+  and missing evidence.
+- `judge`: emits `JudgeRubric` assessments.
+
+Agents must use tool allowlists. Missing tools fail with the normal harness tool
+errors. Agents must not read or write outside the example data boundary.
+
+## Workflow Model
+
+Workflows use plan/reason/reflect/judge phases when the task requires durable
+analysis:
+
+1. `plan`: choose evidence needs, tools, risk level, and acceptance criteria.
+2. `reason`: gather evidence and produce a first structured result.
+3. `reflect`: critique the result for gaps, contradiction, and unsafe edits.
+4. `judge`: emit a rubric and decide whether human review is required.
+5. `apply`: mutate local wiki/artifacts only after tool validation and, where
+   required, human approval.
+
+Every workflow output must include enough typed data for the UI to render
+markdown, panel specs, citations, affected pages, graph highlights, and review
+requests without scraping prose.
+
+## Required Workflows
+
+### `answer_question`
 
 Input:
 
@@ -241,20 +394,35 @@ Output:
 ```ts
 {
   answer: string
-  citedPages: string[]
-  confidenceNotes: string[]
+  citations: string[]
+  relatedPages: string[]
 }
 ```
 
-Behavior: searches and reads current wiki pages, answers the question in
-markdown-safe text, and cites page slugs used for the answer.
-
-### `lint_wiki`
+### `improve_page`
 
 Input:
 
 ```ts
-{ scope?: 'all' | string[] }
+{ slug: string; instruction: string }
+```
+
+Output:
+
+```ts
+{
+  slug: string
+  summary: string
+  changed: boolean
+}
+```
+
+### `audit_wiki`
+
+Input:
+
+```ts
+{ focus?: string }
 ```
 
 Output:
@@ -269,9 +437,6 @@ Output:
   panelSpec: unknown
 }
 ```
-
-Behavior: analyzes wiki pages and returns a structured report renderable through
-`json-renderer`.
 
 ### `reconcile_contradiction`
 
@@ -295,9 +460,6 @@ Output:
 }
 ```
 
-Behavior: reads the conflicting refs, produces a reconciliation plan, updates
-affected pages only through `write_wiki_page`, and appends a log entry.
-
 ### `generate_research_brief`
 
 Input:
@@ -319,28 +481,393 @@ Output:
 }
 ```
 
-Behavior: generates a concise research brief from selected pages and returns a
-JSON-renderer panel spec for the UI.
+### `source_ingest`
+
+Human-in-the-loop source ingest:
+
+1. User uploads or selects a source.
+2. `source_extractor` proposes new pages, updates, claims, citations,
+   contradictions, and open questions.
+3. Workflow emits or returns a `ReviewRequest`.
+4. UI shows the review form only while review is required.
+5. User accepts, rejects, chooses alternatives, or provides custom guidance.
+6. Approved decisions apply edits through tools and append a log entry.
+
+The workflow must not mutate wiki pages before approval.
+
+### `decision_memo`
+
+Input:
+
+```ts
+{
+  question: string
+  options: string[]
+  criteria?: string[]
+  pageRefs?: string[]
+  sourceRefs?: string[]
+}
+```
+
+Output:
+
+```ts
+{
+  markdown: string
+  recommendation: string
+  options: Array<{ id: string; label: string; pros: string[]; cons: string[] }>
+  citedEvidence: EvidenceItem[]
+  judge: JudgeRubric
+  graphHighlights: GraphHighlight[]
+  panelSpec: unknown
+}
+```
+
+### `architecture_review`
+
+Input:
+
+```ts
+{
+  focus: string
+  pageRefs?: string[]
+  sourceRefs?: string[]
+  includeDiagram?: boolean
+}
+```
+
+Output:
+
+```ts
+{
+  markdown: string
+  risks: Array<{ title: string; severity: 'low' | 'medium' | 'high'; mitigation: string }>
+  citedEvidence: EvidenceItem[]
+  diagramArtifactId?: string
+  mermaid?: string
+  judge: JudgeRubric
+  graphHighlights: GraphHighlight[]
+  panelSpec: unknown
+}
+```
+
+When draw.io MCP is configured, this workflow may create a draw.io/SVG/PNG
+artifact. Without MCP, it uses Mermaid and stores the Mermaid source.
+
+### `wiki_quality_audit`
+
+Input:
+
+```ts
+{
+  focus?: string
+  allowHighRiskSuggestions?: boolean
+}
+```
+
+Output:
+
+```ts
+{
+  markdown: string
+  proposedChanges: ProposedPageChange[]
+  citedEvidence: EvidenceItem[]
+  judge: JudgeRubric
+  graphHighlights: GraphHighlight[]
+  reviewRequest: ReviewRequest
+  panelSpec: unknown
+}
+```
+
+This workflow must never mutate wiki pages before a human decision is submitted.
+
+## Direct Agent Chat
+
+The main chat invokes `session.agents.wiki_answerer.stream(...)` directly.
+
+Required behavior:
+
+- answer questions from current wiki pages and sources;
+- stream run events and show model/tool progress;
+- show exactly one pending state: `Thinking`;
+- render tool calls as one collapsible tool section, not duplicate messages;
+- collapse tool details once answer text starts streaming or when the run
+  finishes;
+- render markdown, tables, code blocks, links, wiki links, and Mermaid diagrams;
+- not trigger workflow-only review cards unless a typed `ReviewRequest` is
+  returned.
+
+## Review Decisions
+
+`POST /api/reviews/:runId/decision` is the canonical resume entrypoint. It
+starts follow-up work itself; implementations must not add a second public
+`apply_reviewed_ingest` endpoint. The endpoint is idempotent for
+`(runId, reviewRequestId)`.
+
+Allowed decisions:
+
+- `accept_all`: apply every proposed change.
+- `reject_all`: apply nothing and append a rejection log entry.
+- `accept_selected`: apply only `acceptedChangeIds`.
+- `choose_alternative`: apply selected alternatives identified by
+  `selectedAlternativeIds`.
+- `custom_guidance`: starts follow-up work at `plan` for source ingest/wiki
+  audit, or at `reason` for decision memo/architecture review.
+
+## Knowledge Graph
+
+The map view is a practical analysis surface.
+
+Required behavior:
+
+- use Three.js for the primary graph view;
+- nodes are wiki pages, sources, concepts, and artifacts;
+- edges are wiki links, citations, derived relationships, and artifact refs;
+- clicking a node opens the page/source/artifact or filters concepts;
+- latest run metadata can highlight cited pages, changed pages, contradiction
+  clusters, orphan pages, and recommended merges;
+- graph side panel uses `json-renderer` for stats and recommended actions.
+
+```ts
+interface GraphNode {
+  id: string
+  label: string
+  kind: 'page' | 'source' | 'concept' | 'artifact'
+  ref: string
+}
+
+interface GraphEdge {
+  id: string
+  source: string
+  target: string
+  kind: 'wiki_link' | 'citation' | 'derived_relationship' | 'artifact_reference'
+  weight: number
+}
+
+interface GraphHighlight {
+  nodeIds: string[]
+  edgeIds: string[]
+  kind: 'cited' | 'changed' | 'contradiction' | 'orphan' | 'merge_candidate'
+  label: string
+}
+
+interface GraphResponse {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  highlights: GraphHighlight[]
+  latestRunId?: string
+  panelSpec: unknown
+}
+```
+
+Stable ids:
+
+- page nodes: `page:<pageId>`;
+- uploaded source nodes: `source:<sourceId>`;
+- concept nodes: `concept:<slug>`;
+- artifact nodes: `artifact:<artifactId>`;
+- edges: `<kind>:<sourceNodeId>:<targetNodeId>`.
+
+## Markdown, Mermaid, And Artifacts
+
+Markdown rendering must support:
+
+- GitHub-flavored markdown;
+- tables;
+- fenced code blocks;
+- wiki links;
+- Mermaid code fences through lazy-loaded `beautiful-mermaid`;
+- safe Mermaid fallback when rendering fails.
+
+`json-renderer` panels are allowed only when returned by direct agents or
+workflows as typed panel specs.
+
+Artifacts are stored by manifest plus content file:
+
+```ts
+interface ArtifactManifest {
+  artifactId: string
+  kind: 'markdown' | 'mermaid' | 'svg' | 'drawio_xml' | 'json_panel'
+  title: string
+  contentType: string
+  storagePath: string
+  createdByRunId: string
+  sourcePageIds: string[]
+  digest: string
+  createdAt: string
+  renderMode: 'inline' | 'document' | 'download'
+}
+```
+
+Rules:
+
+- Mermaid source remains canonical; rendered SVG may be cached separately.
+- SVG is sanitized before rendering and capped at 1 MB by default.
+- draw.io XML is previewed when possible and otherwise offered as an artifact.
+- PNG data URLs from MCP are accepted only under the artifact size limit.
+- artifact ids are backend-generated;
+- artifact paths are always below the example data directory.
+
+## MCP Runtime Support
+
+The public MCP tool shapes from [07-tools](./07-tools.md) are executable:
+
+- `kind: 'mcp_stdio'`;
+- `kind: 'mcp_http'`.
+
+Locked decisions:
+
+- MCP runners are executable in this wave.
+- `@modelcontextprotocol/sdk` is loaded through dynamic import by MCP runner
+  modules. TS-only harnesses must not import or require the SDK at runtime.
+- Public `McpAuth` is:
+
+```ts
+type McpAuth =
+  | { kind: 'none' }
+  | { kind: 'bearer'; token: string }
+  | { kind: 'oauth2'; accessToken: string }
+  | { kind: 'api_key'; header: string; value: string }
+  | { kind: 'basic'; username: string; password: string }
+```
+
+- Async bearer token functions are not public API in this wave.
+- `inputAdapter` and `outputAdapter` are supported on stdio and HTTP tools.
+- `McpProtocolError.meta.phase` is `'connect' | 'list' | 'call'`.
+- Schema discovery failures before the model call use phase `'list'`.
+- Transport connection failures use phase `'connect'`.
+- Tool envelope failures and process death during a call use phase `'call'`.
+
+Required resolved MCP tool shape:
+
+```ts
+interface ResolvedMcpTool {
+  localToolId: string
+  kind: 'mcp_stdio' | 'mcp_http'
+  description: string
+  upstreamToolName: string
+  inputSchema: unknown
+  outputSchema?: unknown
+  timeoutMs: number
+  serverKey: string
+}
+```
+
+No network, process, or MCP SDK work happens during `.tools(...)` or `.build()`.
+For an agent that allowlists MCP tools, schemas are initialized immediately
+before the first model call of the run. Initialization creates/reuses the runner,
+runs optional stdio install commands inside the sandbox, calls `tools/list`,
+verifies the upstream tool exists, caches the schema for that runner, and builds
+`ModelToolSpec` entries.
+
+MCP output normalization:
+
+- prefer `structuredContent` when present and JSON-compatible;
+- otherwise join text content blocks with `\n`;
+- image/resource blocks become `{ contentType, data?, uri? }`;
+- mixed content becomes `{ content: [...] }`;
+- `isError: true` throws `ToolError` with `tool_kind`;
+- output JSON Schema validation runs after normalization and before
+  `outputAdapter`.
+
+Stdio behavior:
+
+- stdio exchanges execute through the current `SandboxSession.exec`;
+- optional install/bootstrap commands run through the same sandbox;
+- if `SandboxSession.executor === 'unavailable'`, stdio MCP fails with
+  `SandboxNoExecutorError`;
+- concurrent calls to the same stdio runner are serialized;
+- process death respawns on the next call;
+- shutdown cancels in-flight calls and clears runner state;
+- stderr and payloads are redacted unless content capture is explicitly enabled.
+
+HTTP behavior:
+
+- use SDK streamable HTTP transport where available;
+- support auth none, bearer, OAuth2 token, API key header, and basic auth;
+- apply user headers first and auth headers second so auth wins;
+- `401` and `403` map to `McpAuthError`;
+- other non-2xx transport failures map to `McpProtocolError` unless the SDK
+  exposes a more precise error.
+
+Schema validation:
+
+- use a local JSON Schema validator for the draft 2020-12 subset in
+  [07-tools](./07-tools.md);
+- unsupported keywords warn once per `(toolId, keyword)`;
+- `additionalProperties:false` rejects unknown keys;
+- omitted `additionalProperties` allows unknown keys;
+- type arrays are supported for nullable fields;
+- malformed MCP schemas map to `McpProtocolError{phase:'list'}`;
+- validation failure throws `ValidationError{where:'mcp_input'|'mcp_output'}`;
+- `ValidationError.meta.issues` contains
+  `{ path: string; message: string; keyword?: string }[]`.
+
+Lifecycle:
+
+- the harness exposes an idempotent shutdown path for MCP runners;
+- no new MCP calls start after shutdown begins;
+- in-flight MCP calls receive cancellation;
+- MCP runners close before state and sandbox adapters;
+- close failures are aggregated when the public shutdown surface supports a
+  result, otherwise logged and rethrown as the first error.
+
+Telemetry:
+
+- MCP calls use normal tool spans;
+- required attributes include `gen_ai.tool.type`, `gen_ai.tool.name`,
+  `harness.mcp.server`, `harness.mcp.tool`, `harness.mcp.transport`,
+  `harness.run.id`, `harness.session.id`, `harness.agent.id`, and optional
+  `harness.workflow.id`;
+- request/response bodies are not recorded by default;
+- auth headers, tokens, API keys, and configured env values are always redacted.
 
 ## API
 
-Hono MUST expose these routes:
+Hono exposes these routes:
 
 | Method | Route | Behavior |
-|--------|-------|----------|
+|---|---|---|
 | `GET` | `/api/health` | Returns service status and current model name. |
 | `GET` | `/api/pages` | Lists wiki pages with slug, title, and summary metadata. |
 | `GET` | `/api/pages/:slug` | Returns one wiki page. |
 | `PUT` | `/api/pages/:slug` | Replaces one wiki page after validation. |
 | `GET` | `/api/sources` | Lists source markdown files. |
 | `GET` | `/api/sources/:slug` | Returns one source markdown file. |
+| `GET` | `/api/graph` | Returns graph nodes, edges, panel spec, and latest highlights. |
+| `POST` | `/api/agents/:agentId` | Starts a direct agent run. |
 | `POST` | `/api/workflows/:workflowId` | Starts one typed workflow and returns `runId` plus initial status. |
-| `GET` | `/api/runs/:runId` | Returns current run status, terminal result when available, and trace metadata when known. |
+| `GET` | `/api/runs/:runId` | Returns current run status, terminal result, and trace metadata when known. |
 | `GET` | `/api/runs/:runId/events` | Streams sanitized live run events as SSE. |
 | `POST` | `/api/runs/:runId/cancel` | Cancels an in-flight run. |
+| `POST` | `/api/reviews/:runId/decision` | Submits a human review decision and starts/resumes follow-up work. |
+| `GET` | `/api/artifacts/:artifactId` | Returns generated Mermaid/draw.io/SVG artifacts. |
+| `POST` | `/api/artifacts` | Stores an approved generated artifact. |
 
-API errors MUST be JSON. Validation errors MUST identify the invalid field but
-MUST NOT include confidential payload content.
+API errors are JSON:
+
+```ts
+interface ApiErrorResponse {
+  error: {
+    code: string
+    message: string
+    details?: unknown
+  }
+}
+```
+
+Required error responses:
+
+| Case | Status | Code |
+|---|---:|---|
+| unknown agent/workflow/artifact | 404 | `NOT_FOUND` |
+| invalid request body | 400 | `VALIDATION_ERROR` |
+| stale or already superseded review request | 409 | `STALE_REVIEW_REQUEST` |
+| invalid review decision for request | 400 | `INVALID_REVIEW_DECISION` |
+| unsupported artifact kind | 400 | `UNSUPPORTED_ARTIFACT_TYPE` |
+| artifact render failure | 422 | `ARTIFACT_RENDER_FAILED` |
+| MCP optional tool unavailable | 503 | `MCP_UNAVAILABLE` |
+| session already running | 409 | `SESSION_BUSY` |
 
 ## SSE
 
@@ -348,57 +875,59 @@ MUST NOT include confidential payload content.
 
 Required behavior:
 
-- sends standard `text/event-stream` responses
-- streams sanitized harness run events
-- preserves delivered order for the subscribed run
-- sends terminal status when available
-- supports browser reconnect best-effort
-- does not promise complete replay
-- does not block workflow/model/tool execution on slow browser consumers
-- treats persisted harness events as authoritative
+- standard `text/event-stream` responses;
+- sanitized harness run events;
+- delivered order for the subscribed run;
+- terminal status when available;
+- browser reconnect best-effort;
+- no promise of complete replay;
+- slow browser consumers do not block workflow/model/tool execution;
+- persisted harness events remain authoritative.
 
-The UI MUST handle these states:
-
-- idle
-- invoking workflow
-- SSE connected
-- SSE reconnecting
-- completed
-- failed
-- cancelled
-- overflow notice when emitted
+The UI handles idle, invoking workflow, SSE connected, reconnecting, completed,
+failed, cancelled, and overflow notice states.
 
 ## UI
 
-The first screen MUST be the working application, not a landing page.
+The first screen is the working application, not a landing page.
 
 Required layout:
 
-- Left sidebar: wiki tree, source list, workflow launcher.
-- Center: markdown page/source viewer with edit mode for wiki pages.
-- Right inspector: active run, SSE events, trace id/link, structured output,
-  affected pages.
-- Conversation panel: AI Elements messages, prompt input, tool-call/run
-  progress display.
+- left sidebar: wiki tree, source list, workflow launcher;
+- center/document and chat split defaults to 50:50 after the sidebar;
+- split is user-resizable;
+- page itself does not scroll;
+- sidebar, document, chat, graph, and drawers scroll independently;
+- inspector is an on-demand drawer with active run, SSE events, trace id/link,
+  structured output, and affected pages;
+- graph/map view uses Three.js as the primary visual surface.
 
-The UI MUST be dense, readable, and suited for repeated research work. It MUST
-avoid marketing-page composition. Buttons and controls should use familiar icon
-or shadcn patterns where available. Text MUST fit on mobile and desktop
-viewports without overlapping adjacent UI.
+Required interaction:
+
+- AI Elements-style messages, tool displays, and prompt input;
+- multiline prompt with autofocus;
+- auto-scroll to latest message while user is at the bottom;
+- tool details collapse once answer text starts or run finishes;
+- one visible pending label: `Thinking`;
+- review forms appear only for active review requests;
+- `json-renderer` panels appear only when returned by a run.
+
+The UI is dense, readable, and suited for repeated research work. It avoids
+marketing-page composition, decorative gradients/orbs, and overlapping text.
 
 ## OpenTelemetry And Jaeger
 
-The example MUST use standard OpenTelemetry packages. It MUST NOT implement a
-custom tracing backend.
+The example uses standard OpenTelemetry packages and does not implement a custom
+tracing backend.
 
 Required packages include:
 
-- `@opentelemetry/sdk-node`
-- an OTLP HTTP trace exporter
-- `@opentelemetry/resources`
-- `@opentelemetry/semantic-conventions`
+- `@opentelemetry/sdk-node`;
+- an OTLP HTTP trace exporter;
+- `@opentelemetry/resources`;
+- `@opentelemetry/semantic-conventions`.
 
-The service name MUST be:
+The service name is:
 
 ```text
 purista-living-wiki-example
@@ -410,62 +939,118 @@ The default exporter endpoint is:
 http://localhost:4318/v1/traces
 ```
 
-The `jaeger` npm script MUST wrap this exact command:
+The `jaeger` npm script wraps this exact command:
 
 ```bash
 docker run --rm --name jaeger -p 16686:16686 -p 4317:4317 -p 4318:4318 -p 5778:5778 -p 9411:9411 cr.jaegertracing.io/jaegertracing/jaeger:2.17.0
 ```
 
-Traces MUST show this flow when a workflow is invoked:
+Traces show:
 
 ```text
-Hono request -> session/invoke -> workflow -> agent -> model provider -> tools -> state/sandbox where used
+Hono request -> session/invoke -> direct agent or workflow -> agent -> model provider -> tools -> state/sandbox/MCP/artifact where used
 ```
 
-The UI MUST expose a trace id or Jaeger link for the active run when trace
-metadata is available. Missing Jaeger must not prevent local app usage.
+The UI exposes a trace id or Jaeger link for the active run when trace metadata
+is available. Missing Jaeger does not prevent local app usage.
 
 ## Documentation
 
-The example MUST include `examples/living-wiki-jaeger/README.md` covering:
+The example README covers:
 
-- setup
-- root `.env` usage
-- `OPENAI_API_KEY`
-- default `gpt-5-mini` model
-- Jaeger startup
-- development commands
-- all five workflows
-- UI usage
-- privacy-safe telemetry defaults
-- fake-provider test behavior
-- manual OpenAI verification
+- setup;
+- root `.env` usage;
+- `OPENAI_API_KEY`;
+- default `gpt-5-mini` model;
+- Jaeger startup;
+- development commands;
+- direct agent chat and all workflows;
+- UI usage;
+- privacy-safe telemetry defaults;
+- fake-provider test behavior;
+- manual OpenAI verification;
+- draw.io MCP optional setup;
+- artifact storage;
+- graph/visualization use case.
 
-The root `.env.example` MUST include the OpenAI and OTel keys documented in this
-spec.
+Docs must also cover:
 
-The root docs or examples index MUST link to the example after it is
-implemented.
+- direct agent vs workflow execution;
+- MCP tool configuration and security;
+- human-in-the-loop workflow pattern;
+- plan/reason/reflect/judge workflow pattern;
+- operational notes for MCP child processes, timeouts, auth, shutdown, and
+  observability.
 
 ## Tests
 
-Required automated tests:
+Required harness tests:
 
-- slug and path traversal protection
-- tool schemas and file IO behavior
-- all five workflows using a fake model provider
-- API workflow start, run lookup, SSE subscription, and cancellation
-- UI happy path with fake backend/provider
-- default tests prove no OpenAI network call is made
+- MCP stdio happy path with a fake MCP server;
+- MCP stdio process death and respawn;
+- MCP HTTP happy path with fake server;
+- MCP auth failure mapping;
+- MCP input/output validation failure;
+- timeout/cancellation propagation;
+- MCP tools appear in model tool specs;
+- shutdown closes stdio processes;
+- MCP SDK is not imported for harnesses that only use TS tools.
 
-Required manual verification:
+Required example tests:
+
+- slug and path traversal protection;
+- tool schemas and file IO behavior;
+- direct agent API run;
+- workflow run;
+- all baseline workflows using a fake model provider;
+- source ingest review request rendering and decision submission;
+- decision memo workflow happy path;
+- architecture review workflow happy path;
+- wiki quality audit blocks mutation until review approval;
+- graph route and Three.js component smoke test;
+- API workflow start, run lookup, SSE subscription, and cancellation;
+- markdown Mermaid rendering fallback;
+- draw.io MCP disabled fallback;
+- fake draw.io MCP artifact creation when configured;
+- artifact path traversal rejection;
+- UI happy path with fake backend/provider;
+- default tests prove no OpenAI network call is made.
+
+Required fixtures:
+
+| Fixture | Owner path |
+|---|---|
+| fake model outputs for direct chat and workflows | `examples/living-wiki-jaeger/src/backend/__fixtures__/**` |
+| review request and decision payloads | `examples/living-wiki-jaeger/src/backend/__fixtures__/reviews/**` |
+| decision memo output | `examples/living-wiki-jaeger/src/backend/__fixtures__/workflows/decision-memo.json` |
+| architecture review output | `examples/living-wiki-jaeger/src/backend/__fixtures__/workflows/architecture-review.json` |
+| wiki audit output | `examples/living-wiki-jaeger/src/backend/__fixtures__/workflows/wiki-audit.json` |
+| graph payload | `examples/living-wiki-jaeger/src/frontend/__fixtures__/graph.json` |
+| artifact manifests | `examples/living-wiki-jaeger/src/frontend/__fixtures__/artifacts/**` |
+| Mermaid render failure | frontend renderer test fixture |
+| fake draw.io MCP response | `packages/harness/src/testing/fixtures/mcp/**` and example backend fixture |
+
+Layered tests:
+
+- harness MCP contract tests run without external MCP servers;
+- backend route tests use fake providers and fixture payloads;
+- workflow unit tests use fake model outputs;
+- frontend component tests use fixture JSON and do not call backend routes;
+- UI smoke tests verify layout, independent scrolling, graph canvas, chat
+  pending state, and artifact rendering.
+
+Manual verification:
 
 1. `npm run jaeger --workspace @purista/living-wiki-jaeger-example`
-2. start the example with root `.env` containing `OPENAI_API_KEY`
-3. run each workflow with OpenAI `gpt-5-mini`
-4. confirm Jaeger shows request, workflow, agent, model, and tool spans
+2. Start the example with root `.env` containing `OPENAI_API_KEY`.
+3. Run direct chat.
+4. Upload source and approve ingest review.
+5. Run each workflow.
+6. Generate a diagram artifact through configured draw.io MCP.
+7. Confirm Jaeger shows request, session, direct agent, workflow, model, TS
+   tool, MCP tool, state/sandbox, and artifact spans without content capture.
 
-The repository gate remains:
+Repository gate:
 
 ```bash
 npm run lint
@@ -478,29 +1063,28 @@ npm run test:failure
 npm run build
 ```
 
-Generated build output MUST be removed after verification when it is not tracked.
+Generated build output is removed after verification when it is not tracked.
 
 ## Non-goals
 
-This example MUST NOT add:
+This example and refactor still do not add:
 
-- a database
-- authentication
-- multi-user sync
-- MCP support in the original spec 18 baseline; executable MCP support is
-  superseded by [19-living-wiki-intelligence-workspace](./19-living-wiki-intelligence-workspace.md).
-- durable event replay beyond the harness persisted event behavior
-- a new model provider adapter
-- production deployment manifests
-- telemetry content capture by default
+- database persistence;
+- authentication;
+- multi-user sync;
+- cloud deployment manifests;
+- telemetry content capture by default;
+- provider-specific model APIs in app code;
+- a new model provider adapter.
 
 ## Cross-references
 
 - [02-harness-config](./02-harness-config.md) — harness builder and defaults.
-- [07-tools](./07-tools.md) — typed tool behavior.
+- [07-tools](./07-tools.md) — typed and MCP tool behavior.
 - [08-skills](./08-skills.md) — skill loading and mounting.
-- [09-agents](./09-agents.md) — default agent loop.
+- [09-agents](./09-agents.md) — default agent loop and tool use.
 - [10-workflows](./10-workflows.md) — typed workflow handlers.
-- [11-sessions](./11-sessions.md) — session invoke semantics.
+- [11-sessions](./11-sessions.md) — direct agents, workflows, and session invoke semantics.
 - [12-streaming](./12-streaming.md) — bounded live observation and event privacy.
 - [14-otel-conventions](./14-otel-conventions.md) — span and metric conventions.
+- [15-error-catalog](./15-error-catalog.md) — MCP and harness error mapping.

@@ -37,6 +37,7 @@ import type {
   BuilderState,
   TelemetryOptions
 } from '../harness/defineHarness.js'
+import type { HarnessInspection } from '../ports/capabilities.js'
 import type { Sandbox, SandboxSession } from '../sandbox/index.js'
 import type { StateStore } from '../ports/state.js'
 import type { HarnessAdapterContext, HarnessContextConfigurable } from '../ports/harness-context.js'
@@ -58,6 +59,7 @@ type HarnessDefinition<S extends BuilderState> = {
   skills: NonNullable<S['skills']>
   agents: NonNullable<S['agents']>
   workflows: NonNullable<S['workflows']>
+  inspection: HarnessInspection
 }
 
 type SessionState = {
@@ -148,7 +150,7 @@ export function createSessionHarness<S extends BuilderState>(definition: Harness
     }
   }
   configureHarnessAdapters(adapterContext, definition.models as ModelsConfig, definition.state, definition.sandbox, definition.tools as ToolsConfig)
-  const modelRegistry = createModelRegistry(definition.models as ModelsConfig, { telemetry, harnessName: definition.name })
+  const modelRegistry = createModelRegistry(definition.models, { telemetry, harnessName: definition.name })
   const mcpRegistry = createMcpRunnerRegistry()
   const captureContent = definition.telemetry?.captureContent === true
 
@@ -190,6 +192,9 @@ export function createSessionHarness<S extends BuilderState>(definition: Harness
   }
 
   return {
+    inspect(): HarnessInspection {
+      return definition.inspection
+    },
     async getSession(sessionId: string): Promise<Session<S>> {
       await ensureSessionRecord(sessionId)
       const state = await getSessionState(sessionId)
@@ -433,14 +438,24 @@ export function createSessionHarness<S extends BuilderState>(definition: Harness
         agent_id: agentId,
         error: serialized
       })
-      await emit({ type: 'run.finished', runId, at: finishedAt, error: serialized })
-      await definition.state.finishRun(runId, {
-        status: finalError instanceof OperationCancelledError ? 'cancelled' : 'failed',
-        finishedAt,
-        error: serialized
+      const runFinished: RunEvent = { type: 'run.finished', runId, at: finishedAt, error: serialized }
+      await terminalizeFailedRun({
+        kind: 'agent',
+        targetId: agentId,
+        sessionId,
+        runId,
+        primaryError: serialized,
+        emitRunFinished: () => emit(runFinished),
+        finishRun: () => definition.state.finishRun(runId, {
+          status: finalError instanceof OperationCancelledError ? 'cancelled' : 'failed',
+          finishedAt,
+          error: serialized
+        }),
+        upsertSession: async () => {
+          const sessionRecord = await ensureSessionRecord(sessionId)
+          await definition.state.upsertSession({ ...sessionRecord, updatedAt: finishedAt, runCount: sessionRecord.runCount + 1 })
+        }
       })
-      const sessionRecord = await ensureSessionRecord(sessionId)
-      await definition.state.upsertSession({ ...sessionRecord, updatedAt: finishedAt, runCount: sessionRecord.runCount + 1 })
       throw finalError
     } finally {
       runSignal.cleanup()
@@ -562,6 +577,7 @@ export function createSessionHarness<S extends BuilderState>(definition: Harness
             signal: runSignal.signal,
             runId,
             sessionId,
+            models: modelRegistry,
             agents: Object.fromEntries(
               Object.entries(definition.agents).map(([agentId, agent]) => [
                 agentId,
@@ -641,18 +657,73 @@ export function createSessionHarness<S extends BuilderState>(definition: Harness
         error: serialized
       })
       const runFinished: RunEvent = { type: 'run.finished', runId, at: finishedAt, error: serialized }
-      await emit(runFinished)
-      await definition.state.finishRun(runId, {
-        status: finalError instanceof OperationCancelledError ? 'cancelled' : 'failed',
-        finishedAt,
-        error: serialized
+      await terminalizeFailedRun({
+        kind: 'workflow',
+        targetId: workflowId,
+        sessionId,
+        runId,
+        primaryError: serialized,
+        emitRunFinished: () => emit(runFinished),
+        finishRun: () => definition.state.finishRun(runId, {
+          status: finalError instanceof OperationCancelledError ? 'cancelled' : 'failed',
+          finishedAt,
+          error: serialized
+        }),
+        upsertSession: async () => {
+          const sessionRecord = await ensureSessionRecord(sessionId)
+          await definition.state.upsertSession({ ...sessionRecord, updatedAt: finishedAt, runCount: sessionRecord.runCount + 1 })
+        }
       })
-      const sessionRecord = await ensureSessionRecord(sessionId)
-      await definition.state.upsertSession({ ...sessionRecord, updatedAt: finishedAt, runCount: sessionRecord.runCount + 1 })
       throw finalError
     } finally {
       runSignal.cleanup()
       state.busy = false
+    }
+  }
+
+  async function terminalizeFailedRun(args: {
+    kind: 'agent' | 'workflow'
+    targetId: string
+    sessionId: string
+    runId: string
+    primaryError: ReturnType<typeof serializeError>
+    emitRunFinished: () => Promise<void>
+    finishRun: () => Promise<void>
+    upsertSession: () => Promise<void>
+  }): Promise<void> {
+    await runFailureTerminalizationStep(args, 'emit_run_finished', args.emitRunFinished)
+    await runFailureTerminalizationStep(args, 'finish_run', args.finishRun)
+    await runFailureTerminalizationStep(args, 'upsert_session', args.upsertSession)
+  }
+
+  async function runFailureTerminalizationStep(
+    args: {
+      kind: 'agent' | 'workflow'
+      targetId: string
+      sessionId: string
+      runId: string
+      primaryError: ReturnType<typeof serializeError>
+    },
+    operation: 'emit_run_finished' | 'finish_run' | 'upsert_session',
+    step: () => Promise<void>
+  ): Promise<void> {
+    try {
+      await step()
+    } catch (error) {
+      telemetry.recordCounter('harness.runs.terminalization_errors', 1, {
+        harness: definition.name,
+        'harness.run.kind': args.kind,
+        'harness.run.terminalization.operation': operation
+      })
+      definition.logger.error('Failed to terminalize failed run; preserving primary run error.', {
+        harness: definition.name,
+        session_id: args.sessionId,
+        run_id: args.runId,
+        [`${args.kind}_id`]: args.targetId,
+        operation,
+        primary_error: args.primaryError,
+        error: serializeError(error)
+      })
     }
   }
 }
@@ -723,6 +794,26 @@ function sanitizeEventForPersistence(event: RunEvent, captureContent: boolean): 
       } as unknown as JsonValue
     case 'model.message':
       return { agentId: event.agentId, message: '[redacted]' }
+    case 'model.delta':
+      return { agentId: event.agentId, delta: '[redacted]' }
+    case 'model.object.partial':
+      return { ...(event.agentId ? { agentId: event.agentId } : {}), partial: '[redacted]' }
+    case 'model.object':
+      return { ...(event.agentId ? { agentId: event.agentId } : {}), object: '[redacted]' }
+    case 'model.embedding.completed':
+      return {
+        ...(event.agentId ? { agentId: event.agentId } : {}),
+        count: event.count,
+        ...(event.dimensions !== undefined ? { dimensions: event.dimensions } : {}),
+        ...(event.usage ? { usage: event.usage } : {})
+      } as unknown as JsonValue
+    case 'model.rerank.completed':
+      return {
+        ...(event.agentId ? { agentId: event.agentId } : {}),
+        count: event.count,
+        ...(event.topN !== undefined ? { topN: event.topN } : {}),
+        ...(event.usage ? { usage: event.usage } : {})
+      } as unknown as JsonValue
     case 'stream.overflow':
       return { dropped: event.dropped }
   }

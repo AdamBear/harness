@@ -70,15 +70,21 @@ Each contract suite calls `make()` per test for isolation. Required tests:
 3. `mount(files, '/skills/foo')` makes every entry visible under `/skills/foo/`.
 4. Relative paths throw `SandboxError{reason:'invalid_path'}`.
 5. When `executor === 'available'`: `exec('echo hi')` returns `{stdout:'hi\n', exitCode:0}`; `timeoutMs` honored; `signal` honored.
-6. When `executor === 'unavailable'`: `exec(...)` throws `SandboxNoExecutorError`.
+6. When `executor === 'unavailable'`: precise TypeScript session types do not expose `exec`; dynamically widened calls to `exec(...)` throw `SandboxNoExecutorError`.
+7. Optional snapshot/resume/hibernate adapters pass the sandbox snapshot contract: snapshot ids are stable, resumed sessions can read prior files, unknown snapshots throw `SandboxError`, and hibernation closes the active session after snapshotting.
 
 ### ModelProvider
 
 1. Each claimed method exists on the provider.
-2. `text`/`json` honor `signal`.
-3. `tools[]` round-trips into `toolCalls` on response when a scripted tool-use case is configured (FakeModelProvider provides scripted mode).
-4. `usage` is populated.
-5. Provider maps a "context length exceeded" response to `ModelError{meta.reason:'context_length_exceeded'}`.
+2. `text`/`object`/`embed`/`rerank` honor `signal`.
+3. `textStream` and `objectStream` propagate abort and provider failures.
+4. `tools[]` round-trips into `toolCalls` on response when a scripted tool-use case is configured (FakeModelProvider provides scripted mode).
+5. `usage` is populated where the response type supports usage.
+6. Content parts require matching capabilities (`vision_input`, `audio_input`, `file_input`) before provider I/O.
+7. Final structured objects validate against schema.
+8. Embedding output count matches input count and vectors honor requested dimensions when provided.
+9. Rerank result ids and indexes point back to submitted documents and results are sorted descending by score.
+10. Provider maps a "context length exceeded" response to `ModelError{meta.reason:'context_length_exceeded'}`.
 
 ### Logger
 
@@ -107,6 +113,16 @@ The harness package additionally has integration tests:
   4. Consumer `take()` throwing logs `STREAM_SUBSCRIBER_FAILED` and removes the subscription; the run continues.
   5. Per-run total ordering matches the rules in [12-streaming](./12-streaming.md).
   6. Persistence: every emitted event is written to `state.appendEvents`; `appendEvents` failure increments `harness.events.persist_errors` without failing the run.
+- Provider runtime parity:
+  1. Missing `object`, `object_stream`, `embeddings`, or `rerank` capability fails before provider I/O.
+  2. Missing provider method fails with `ModelCapabilityError{meta.reason:'method_missing'}`.
+  3. Type tests assert capability-projected handles: absent operation capabilities remove methods; absent marker capabilities reject `tools`, tool-role messages, and unsupported content parts.
+  4. `FakeModelProvider` covers text, object, text stream, object stream, multimodal capability checks, embeddings, reranking, abort, timeout, provider errors, malformed structured output, bad embedding counts, and bad rerank ids.
+  5. Persisted `model.object.partial`, `model.object`, `model.embedding.completed`, and `model.rerank.completed` events omit content unless `telemetry.captureContent === true`.
+- Adapter capability policy:
+  1. `.requires(...)` fails during `build()` when required adapter capabilities are missing.
+  2. `harness.inspect()` returns only data and includes effective capabilities, required capabilities, and adapter descriptors.
+  3. `inMemorySandbox()` type tests assert files-only sessions do not expose `exec`.
 - Public API surface: actual exports of `@purista/harness` (main entry) and `@purista/harness/testing` match [13-public-api](./13-public-api.md) symbol lists.
 - Error catalog: every class is exported; every `code`/`category`/`retriable` matches [15-error-catalog](./15-error-catalog.md).
 - OTel: every span name and metric in [14-otel-conventions](./14-otel-conventions.md) is emitted at least once across the integration tests; verified via an in-memory tracer/meter.

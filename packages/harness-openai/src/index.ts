@@ -1,10 +1,12 @@
 import type {
   BaseModelProviderOptions,
-  JsonRequest,
-  JsonResponse,
-  JsonStreamChunk,
+  EmbeddingRequest,
+  EmbeddingResponse,
   ModelMessage,
   ModelProvider,
+  ObjectRequest,
+  ObjectResponse,
+  ObjectStreamChunk,
   TextRequest,
   TextResponse,
   TextStreamChunk,
@@ -12,7 +14,7 @@ import type {
   TokenUsage,
   JsonValue
 } from '@purista/harness'
-import { BaseModelProvider } from '@purista/harness'
+import { BaseModelProvider, ModelError } from '@purista/harness'
 import OpenAI, { type ClientOptions } from 'openai'
 
 /**
@@ -35,7 +37,7 @@ export interface OpenAiFactoryOptions extends ClientOptions {
  * Execution model:
  * - In-process adapter code
  * - External network calls to OpenAI-compatible chat completions endpoint
- * - AsyncIterable streaming for `textStream` and `jsonStream`
+ * - AsyncIterable streaming for `textStream` and `objectStream`
  *
  * @example
  * ```ts
@@ -48,7 +50,7 @@ export interface OpenAiFactoryOptions extends ClientOptions {
  *     assistant: {
  *       provider: openai({ apiKey: process.env.OPENAI_API_KEY }),
  *       model: 'gpt-4.1-mini',
- *       capabilities: ['json']
+ *       capabilities: ['object']
  *     }
  *   })
  *   .agents({
@@ -91,7 +93,7 @@ class OpenAiModelProvider extends BaseModelProvider {
   protected override async doText(req: TextRequest): Promise<TextResponse> {
       req.signal.throwIfAborted()
       const response = await createChatCompletion(this.client, req, false)
-      return mapTextResponse(response)
+      return mapTextResponse(response, req)
   }
 
   protected override async *doTextStream(req: TextRequest): AsyncIterable<TextStreamChunk> {
@@ -113,7 +115,7 @@ class OpenAiModelProvider extends BaseModelProvider {
               call: {
                 id: call.id,
                 name: call.function.name,
-                arguments: parseToolArgs(call.function.arguments)
+                arguments: parseToolArgs(call.function.arguments, req, 'textStream')
               }
             }
           }
@@ -125,13 +127,13 @@ class OpenAiModelProvider extends BaseModelProvider {
       yield { kind: 'finish', usage, finishReason: 'stop' }
   }
 
-  protected override async doJson(req: JsonRequest): Promise<JsonResponse> {
+  protected override async doObject<T extends JsonValue = JsonValue>(req: ObjectRequest<T>): Promise<ObjectResponse<T>> {
       req.signal.throwIfAborted()
       const response = await createChatCompletion(this.client, req, false)
       const textContent = response.choices[0]?.message?.content ?? '{}'
-      const toolCalls = extractToolCalls(response)
+      const toolCalls = extractToolCalls(response, req, 'object')
       return {
-        data: parseJson(textContent),
+        object: parseJson(textContent, req, 'object') as T,
         ...(toolCalls ? { toolCalls } : {}),
         usage: toUsage(response.usage?.prompt_tokens, response.usage?.completion_tokens),
         finishReason: toFinishReason(response.choices[0]?.finish_reason),
@@ -139,7 +141,7 @@ class OpenAiModelProvider extends BaseModelProvider {
       }
   }
 
-  protected override async *doJsonStream(req: JsonRequest): AsyncIterable<JsonStreamChunk> {
+  protected override async *doObjectStream<T extends JsonValue = JsonValue>(req: ObjectRequest<T>): AsyncIterable<ObjectStreamChunk<T>> {
       req.signal.throwIfAborted()
       let partial = ''
       let usage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
@@ -150,7 +152,7 @@ class OpenAiModelProvider extends BaseModelProvider {
         if (!choice) continue
         if (choice.delta?.content) {
           partial += choice.delta.content
-          yield { kind: 'partial', data: safePartialJson(partial) }
+          yield { kind: 'partial', partial: safePartialJson(partial) }
         }
         if (choice.delta?.tool_calls) {
           for (const call of choice.delta.tool_calls) {
@@ -160,7 +162,7 @@ class OpenAiModelProvider extends BaseModelProvider {
               call: {
                 id: call.id,
                 name: call.function.name,
-                arguments: parseToolArgs(call.function.arguments)
+                arguments: parseToolArgs(call.function.arguments, req, 'objectStream')
               }
             }
           }
@@ -169,17 +171,40 @@ class OpenAiModelProvider extends BaseModelProvider {
           usage = toUsage(chunk.usage.prompt_tokens, chunk.usage.completion_tokens)
         }
       }
-      const data = parseJson(partial || '{}')
-      yield { kind: 'finish', data, usage, finishReason: 'stop' }
+      const object = parseJson(partial || '{}', req, 'objectStream') as T
+      yield { kind: 'finish', object, usage, finishReason: 'stop' }
+  }
+
+  protected override async doEmbed(req: EmbeddingRequest): Promise<EmbeddingResponse> {
+    req.signal.throwIfAborted()
+    const providerOptions = {
+      ...(req.call?.providerOptions ?? {})
+    } as Record<string, unknown> & { requestOptions?: Record<string, unknown> }
+    const { requestOptions, ...bodyOptions } = providerOptions
+    const response = await this.client.embeddings.create({
+      model: req.model,
+      input: req.input,
+      ...(req.dimensions !== undefined ? { dimensions: req.dimensions } : {}),
+      ...bodyOptions
+    }, { ...requestOptions, signal: req.signal })
+
+    return {
+      embeddings: response.data.map((item: any) => ({ index: item.index, vector: item.embedding })),
+      usage: toUsage(response.usage?.prompt_tokens, 0),
+      raw: response
+    }
   }
 }
 
-type ChatRequest = TextRequest | JsonRequest
+type ChatRequest = TextRequest | ObjectRequest
 export type OpenAiClient = {
   chat: {
     completions: {
       create(payload: unknown, options?: { signal?: AbortSignal }): Promise<any>
     }
+  }
+  embeddings: {
+    create(payload: unknown, options?: { signal?: AbortSignal }): Promise<any>
   }
 }
 
@@ -188,8 +213,8 @@ function toClientOptions(options: OpenAiFactoryOptions): ClientOptions {
   return clientOptions
 }
 
-function mapTextResponse(response: any): TextResponse {
-  const toolCalls = extractToolCalls(response)
+function mapTextResponse(response: any, req: TextRequest): TextResponse {
+  const toolCalls = extractToolCalls(response, req, 'text')
   return {
     content: response.choices[0]?.message?.content ?? '',
     ...(toolCalls ? { toolCalls } : {}),
@@ -199,7 +224,7 @@ function mapTextResponse(response: any): TextResponse {
   }
 }
 
-function extractToolCalls(response: any): ToolCallSpec[] | undefined {
+function extractToolCalls(response: any, req: ChatRequest, method: string): ToolCallSpec[] | undefined {
   const toolCalls = response.choices[0]?.message?.tool_calls
   if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
     return undefined
@@ -210,7 +235,7 @@ function extractToolCalls(response: any): ToolCallSpec[] | undefined {
     .map((call: any) => ({
       id: String(call.id),
       name: String(call.function.name),
-      arguments: parseToolArgs(call.function.arguments)
+      arguments: parseToolArgs(call.function.arguments, req, method)
     }))
 }
 
@@ -282,18 +307,29 @@ function toOpenAiMessages(messages: ModelMessage[]): any[] {
         if (part.kind === 'text') {
           return { type: 'text', text: part.text }
         }
-        return {
-          type: 'image_url',
-          image_url: {
-            url: `data:${part.mimeType};base64,${part.dataBase64}`
+        if (part.kind === 'image') {
+          return {
+            type: 'image_url',
+            image_url: {
+              url: `data:${part.mimeType};base64,${part.dataBase64}`
+            }
           }
         }
+        if (part.kind === 'image_url') {
+          return {
+            type: 'image_url',
+            image_url: {
+              url: part.url
+            }
+          }
+        }
+        return { type: 'text', text: `[unsupported ${part.kind} content omitted]` }
       })
     }
   })
 }
 
-function toTools(tools: TextRequest['tools'] | JsonRequest['tools']): any[] | undefined {
+function toTools(tools: TextRequest['tools'] | ObjectRequest['tools']): any[] | undefined {
   if (!tools || tools.length === 0) {
     return undefined
   }
@@ -308,21 +344,31 @@ function toTools(tools: TextRequest['tools'] | JsonRequest['tools']): any[] | un
   }))
 }
 
-function parseToolArgs(argumentsText: string | undefined): JsonValue {
+function parseToolArgs(argumentsText: string | undefined, req: ChatRequest, method: string): JsonValue {
   if (!argumentsText) return {}
   try {
     return JSON.parse(argumentsText)
-  } catch {
-    return { _raw: argumentsText }
+  } catch (error) {
+    throw malformedResponseError(req, method, 'OpenAI returned malformed tool-call argument JSON.', argumentsText, error)
   }
 }
 
-function parseJson(content: string): JsonValue {
+function parseJson(content: string, req: ChatRequest, method: string): JsonValue {
   try {
     return JSON.parse(content)
-  } catch {
-    return { _raw: content }
+  } catch (error) {
+    throw malformedResponseError(req, method, 'OpenAI returned malformed structured object JSON.', content, error)
   }
+}
+
+function malformedResponseError(req: ChatRequest, method: string, message: string, body: unknown, cause: unknown): ModelError {
+  return new ModelError(message, {
+    provider: 'openai',
+    model: req.model,
+    method,
+    reason: 'malformed_response',
+    providerBody: body
+  }, cause)
 }
 
 function safePartialJson(content: string): JsonValue {

@@ -29,6 +29,7 @@ Exit: state contract green.
 Deliverables:
 - `packages/harness/src/ports/sandbox.ts` with `Sandbox` and `SandboxSession`.
 - `packages/harness/src/sandbox/in-memory/` with `inMemorySandbox()` factory; `executor: 'unavailable'`.
+- Capability-projected sandbox session types: files-only sandboxes do not expose `exec`, exec-capable sandboxes do.
 - `sandboxContract` factory parametrized by `{executor}`.
 
 Tests:
@@ -64,14 +65,17 @@ Tests:
 
 Exit: built-in tools green.
 
-## Phase 6 — Models port + alias registry
+## Phase 6 — Provider runtime parity model port + alias registry
 
 Deliverables:
 - `packages/harness/src/ports/model-provider.ts` with all request/response types.
+- `ObjectRequest`, `ObjectResponse`, `ObjectStreamChunk`, `EmbeddingRequest`, `EmbeddingResponse`, `Embedding`, `RerankRequest`, `RerankResponse`, `RerankDocument`, and `RerankResult`.
+- `ModelProviderInfo`, `ModelFeatureSet`, `ContentPartKind`, and `OutputMode`.
 - `packages/harness/src/models/registry.ts` with the per-alias model handle factory.
-- Capability gate (alias-vs-method, provider method existence).
+- Capability gates and type projections for operations, tool use, multimodal content parts, embeddings, and reranking.
+- `FakeModelProvider` support for all model operations and provider contract tests that require no external provider access.
 
-Exit: model gate tests green; `FakeModelProvider` shipped.
+Exit: model gate tests, provider contract tests, and type tests green; no provider SDK dependency added to `@purista/harness`.
 
 ## Phase 7 — Custom tools (TS and MCP)
 
@@ -79,8 +83,8 @@ Deliverables:
 - `packages/harness/src/tools/ts/` with TS tool runner, registry.
 - Zod-to-JSON-Schema converter.
 - MCP stdio/http runners are executable harness tools. Runtime behavior,
-  shutdown, tracing, and contract tests are specified by
-  [19-living-wiki-intelligence-workspace](./19-living-wiki-intelligence-workspace.md).
+  shutdown, tracing, and contract tests are specified by the consolidated
+  [18-living-wiki-jaeger-example](./18-living-wiki-jaeger-example.md).
 
 Exit: TS tool tests and MCP runner tests green.
 
@@ -118,6 +122,7 @@ Deliverables:
   - Open sandbox session, mount declared skills.
   - Build system message with skill index appended.
   - Resolve tool set (custom + built-in, filtered by executor availability).
+  - Default-loop object generation through `models[model].object(...)`.
   - Per-tool permission gate (`allow|ask|deny`) with recoverable denial.
   - `maxSteps` budget (default 16, max 64).
 
@@ -139,6 +144,7 @@ Exit: workflow tests green.
 
 Deliverables:
 - `packages/harness/src/harness/defineHarness.ts` exporting the chainable `HarnessBuilder` entry point.
+- `.runtime(...)`, `.requires(...)`, and `harness.inspect()` for adapter capability policy and data-only inspection.
 - Surface diff test passes for both entries (actual exports == [13-public-api](./13-public-api.md) lists).
 
 Exit: harness complete; coverage ≥85%.
@@ -147,17 +153,24 @@ Exit: harness complete; coverage ≥85%.
 
 Deliverables:
 - `packages/harness-openai/` with `openai(...)` factory extending `BaseModelProvider`.
+- OpenAI mappings for `text`, `textStream`, `object`, `objectStream`, multimodal image input, and embeddings.
+- Reranking only if the current official OpenAI SDK exposes a suitable operation; otherwise omit the capability and keep fake-provider contract coverage.
+- Provider descriptor metadata where it can be static and truthful.
 
 Exit: provider package green; coverage ≥80%.
 
-## Phase 14 — Quickstart example
+## Phase 14 — Quickstart and provider-parity examples
 
 Deliverables:
 - `examples/quickstart/` (private package) demonstrating: define a harness with `@purista/harness-openai`, mount one skill, enable built-in `bash`/`read`, run `prompt` and `stream`.
 - The example exercises the loop end-to-end: model asks for the skill, calls `read /skills/<name>/SKILL.md`, follows instructions, calls `bash`, returns final answer.
+- A focused structured object or multimodal example using only `@purista/harness` and provider packages.
+- A focused embeddings or reranking example using only `@purista/harness` and provider packages.
+- A short integration note explaining how `@purista/ai` consumes `RunEvent` directly instead of introducing a second internal AI protocol.
 
 Constraints:
 - The quickstart example MUST import only from `@purista/harness` and `@purista/harness-openai`.
+- Examples MUST NOT use the Vercel AI SDK stream protocol or a PURISTA AI protocol envelope.
 
 Exit: example runs against `FakeModelProvider` in CI.
 

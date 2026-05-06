@@ -1,3 +1,5 @@
+import { context, trace } from '@opentelemetry/api'
+import { sanitizeForLog } from '../errors/redaction.js'
 import type { Logger, LogLevel } from './logger.js'
 
 const ORDERED_LEVELS: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal']
@@ -63,14 +65,25 @@ export class JsonLogger implements Logger {
       return
     }
 
+    const activeContext = context.active()
+    const spanContext = trace.getSpan(activeContext)?.spanContext() ?? trace.getSpanContext(activeContext)
+    const sanitized = sanitizeForLog({ ...this.bindings, ...fields })
+    const safeFields = sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized)
+      ? sanitized as Record<string, unknown>
+      : {}
     const line = {
       level,
       time: new Date().toISOString(),
       msg,
-      ...this.bindings,
-      ...fields
+      ...(spanContext?.traceId ? { trace_id: spanContext.traceId } : {}),
+      ...(spanContext?.spanId ? { span_id: spanContext.spanId } : {}),
+      ...safeFields
     }
 
-    this.out.write(`${JSON.stringify(line)}\n`)
+    try {
+      this.out.write(`${JSON.stringify(line)}\n`)
+    } catch {
+      // Logging must not affect harness execution.
+    }
   }
 }

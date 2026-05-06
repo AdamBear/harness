@@ -162,9 +162,9 @@ describe('living wiki API', () => {
     const badProvider = {
       id: 'bad-provider',
       genAiSystem: 'fake',
-      async json() {
+      async object() {
         return {
-          data: { answer: 'missing required arrays' },
+          object: { answer: 'missing required arrays' },
           usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
           finishReason: 'stop'
         }

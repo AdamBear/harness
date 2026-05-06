@@ -27,7 +27,7 @@ function config(sandbox: SandboxSession, timeoutMs = 1_000) {
 describe('stdio MCP runner', () => {
   it('discovers tools and invokes a fake stdio MCP server', async () => {
     const sandbox = hostExecSandbox()
-    const localConfig = config(sandbox)
+    const localConfig = config(sandbox as any)
     const runner = createStdioMcpTransportRunner(localConfig)
     try {
       const output = await invokeMcpTool(localConfig, runner, { message: 'hello' }, new AbortController().signal)
@@ -40,7 +40,7 @@ describe('stdio MCP runner', () => {
 
   it('validates input before calling the stdio server', async () => {
     const sandbox = hostExecSandbox()
-    const localConfig = config(sandbox)
+    const localConfig = config(sandbox as any)
     const runner = createStdioMcpTransportRunner(localConfig)
     try {
       await expect(invokeMcpTool(localConfig, runner, { message: 123 }, new AbortController().signal)).rejects.toBeInstanceOf(ValidationError)
@@ -81,7 +81,7 @@ describe('stdio MCP runner', () => {
 
   it('does not run stdio MCP outside a sandbox executor', async () => {
     const sandbox = await inMemorySandbox().open({ sessionId: 'mcp-test', runId: 'r1' })
-    const localConfig = config(sandbox)
+    const localConfig = config(sandbox as any)
     const runner = createStdioMcpTransportRunner(localConfig)
     try {
       await expect(invokeMcpTool(localConfig, runner, { message: 'hello' }, new AbortController().signal)).rejects.toMatchObject({

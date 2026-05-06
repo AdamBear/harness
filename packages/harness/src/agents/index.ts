@@ -10,9 +10,8 @@ import { AgentLoopBudgetError, HarnessError, OperationCancelledError, OperationT
 import type { Logger } from '../logger/index.js'
 import type { JsonValue } from '../models/json.js'
 import type { Message } from '../models/state.js'
-import type { AgentDefinition, BuiltinToolName, ResolvedSkill, RunEvent, SessionMemory, ToolsConfig } from '../harness/defineHarness.js'
+import type { AgentDefinition, BuiltinToolName, ModelHandles, ResolvedSkill, RunEvent, SessionMemory, ToolsConfig } from '../harness/defineHarness.js'
 import type { ModelMessage } from '../ports/model-provider.js'
-import type { ModelHandle } from '../models/registry.js'
 import type { SandboxSession } from '../sandbox/index.js'
 import type { TelemetryShim } from '../telemetry/index.js'
 import { buildSkillIndex, mountSkillsOnce } from '../skills/index.js'
@@ -46,7 +45,7 @@ export async function runDefaultAgent(args: {
   input: unknown
   history: Message[]
   agent: AgentDefinition<any>
-  models: Record<string, ModelHandle>
+  models: Record<string, any>
   skills: Record<string, ResolvedSkill>
   customTools: ToolsConfig
   mcpRegistry?: McpRunnerRegistry
@@ -85,7 +84,7 @@ async function runDefaultAgentInner(args: {
   input: unknown
   history: Message[]
   agent: AgentDefinition<any>
-  models: Record<string, ModelHandle>
+  models: Record<string, any>
   skills: Record<string, ResolvedSkill>
   customTools: ToolsConfig
   mcpRegistry?: McpRunnerRegistry
@@ -114,6 +113,7 @@ async function runDefaultAgentInner(args: {
     const output = await args.agent.handler({
       input: parsedInput,
       signal: args.signal,
+      models: args.models as ModelHandles<any>,
       runId: args.runId,
       sessionId: args.sessionId,
       history: { list: async () => args.history },
@@ -162,7 +162,7 @@ async function runDefaultAgentInner(args: {
     args.signal.throwIfAborted()
     if (steps >= maxSteps) throw new AgentLoopBudgetError('Agent loop budget exceeded.', { agent_id: args.agentId, reason: 'iterations_exceeded', limit: maxSteps })
     if (steps === 0) await args.emitEvent?.({ type: 'agent.started', runId: args.runId, agentId: args.agentId, at: new Date().toISOString() })
-    const response = await model.json({
+    const response = await model.object({
       messages: [
         { role: 'system', content: instructions },
         ...modelMessages
@@ -179,7 +179,7 @@ async function runDefaultAgentInner(args: {
 
     const toolCalls = response.toolCalls ?? []
     if (toolCalls.length === 0) {
-      const validated = parseAgentSchema(outputSchema, response.data, 'agent_output')
+      const validated = parseAgentSchema(outputSchema, response.object, 'agent_output')
       emitted.push({ id: `msg_${Date.now()}_a`, sessionId: args.sessionId, runId: args.runId, role: 'assistant', content: JSON.stringify(validated), timestamp: new Date().toISOString() })
       await args.emitEvent?.({ type: 'agent.finished', runId: args.runId, agentId: args.agentId, at: new Date().toISOString(), output: validated as JsonValue })
       return { output: validated as JsonValue, emitted }

@@ -14,6 +14,10 @@ type RunEvent =
 
   | { type: 'model.delta';     runId: string; agentId: string; delta: string }
   | { type: 'model.message';   runId: string; agentId: string; message: Message }
+  | { type: 'model.object.partial'; runId: string; agentId?: string; partial: JsonValue }
+  | { type: 'model.object';    runId: string; agentId?: string; object: JsonValue }
+  | { type: 'model.embedding.completed'; runId: string; agentId?: string; count: number; dimensions?: number; usage?: TokenUsage }
+  | { type: 'model.rerank.completed'; runId: string; agentId?: string; count: number; topN?: number; usage?: TokenUsage }
 
   | { type: 'tool.started';    runId: string; agentId: string; toolId: string; callId: string; input: JsonValue }
   | { type: 'tool.finished';   runId: string; agentId: string; toolId: string; callId: string; output?: JsonValue; error?: SerializedError }
@@ -59,6 +63,7 @@ Each `prompt`/`stream` invocation creates an internal async generator. Events ar
 4. For each tool call, `tool.started` precedes `tool.finished` (same `callId`). Same for skills.
 5. For each agent call, `agent.started` precedes `agent.finished`.
 6. `model.delta` events for a given assistant message are yielded in stream order; `model.message` is yielded at most once per assistant message AFTER all deltas for that message.
+7. `model.object.partial` events for a structured object stream are yielded in provider chunk order; `model.object` is yielded at most once for the final validated object AFTER all partials for that object.
 
 No ordering is guaranteed *across* runs (only within a run).
 
@@ -83,7 +88,7 @@ If a consumer's `take()` throws (e.g. consumer code rejects), the harness remove
 
 Persisted event payloads are sanitized by default. `runId`, `at`, and `type` are stored as `PersistedRunEvent` fields and are not duplicated inside `payload`.
 
-When `telemetry.captureContent` is false or omitted, prompts, model outputs, tool inputs/results, memory, files, and user data MUST NOT be stored in persisted event payloads. Payloads may include operational metadata such as ids, status, counts, and serialized harness errors.
+When `telemetry.captureContent` is false or omitted, prompts, model outputs, structured object payloads, tool inputs/results, memory, files, and user data MUST NOT be stored in persisted event payloads. Payloads may include operational metadata such as ids, status, counts, dimensions, `topN`, usage, and serialized harness errors.
 
 When `telemetry.captureContent === true`, persisted payloads may include full event content for diagnostics. This mode is explicit and should be used only where sensitive-content retention is allowed.
 

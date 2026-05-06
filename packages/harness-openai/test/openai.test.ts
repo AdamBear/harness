@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ModelError } from '@purista/harness'
 import { openai } from '../src/index.js'
 
 function mockSignal(): AbortSignal {
@@ -107,7 +108,7 @@ describe('openai provider factory', () => {
     })
   })
 
-  it('maps json response from text content', async () => {
+  it('maps object response from text content', async () => {
     const calls: any[] = []
     const provider = openai({
       client: {
@@ -131,14 +132,14 @@ describe('openai provider factory', () => {
     })
 
     const schema = { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' } } }
-    const response = await provider.json!({
+    const response = await provider.object!({
       model: 'gpt-4.1-mini',
-      messages: [{ role: 'user', content: 'json please' }],
+      messages: [{ role: 'user', content: 'object please' }],
       schema,
       signal: mockSignal()
     })
 
-    expect(response.data).toEqual({ ok: true })
+    expect(response.object).toEqual({ ok: true })
     expect(response.usage.totalTokens).toBe(5)
     expect(calls[0]?.response_format).toEqual({
       type: 'json_schema',
@@ -146,6 +147,128 @@ describe('openai provider factory', () => {
         name: 'harness_response',
         strict: false,
         schema
+      }
+    })
+  })
+
+  it('rejects invalid object JSON with ModelError', async () => {
+    const provider = openai({
+      client: {
+        chat: {
+          completions: {
+            create: async () => ({
+              choices: [
+                {
+                  message: { content: '{"ok":' },
+                  finish_reason: 'stop'
+                }
+              ],
+              usage: { prompt_tokens: 3, completion_tokens: 2 }
+            })
+          }
+        }
+      } as any
+    })
+
+    await expect(
+      provider.object!({
+        model: 'gpt-4.1-mini',
+        messages: [{ role: 'user', content: 'object please' }],
+        schema: { type: 'object' },
+        signal: mockSignal()
+      })
+    ).rejects.toMatchObject({
+      constructor: ModelError,
+      meta: {
+        provider: 'openai',
+        model: 'gpt-4.1-mini',
+        method: 'object',
+        reason: 'malformed_response',
+        providerBody: '{"ok":'
+      }
+    })
+  })
+
+  it('rejects invalid final object stream JSON with ModelError', async () => {
+    async function* chunks() {
+      yield { choices: [{ delta: { content: '{"ok":' } }] }
+      yield { choices: [], usage: { prompt_tokens: 3, completion_tokens: 2 } }
+    }
+
+    const provider = openai({
+      client: {
+        chat: {
+          completions: {
+            create: async () => chunks()
+          }
+        }
+      } as any
+    })
+
+    await expect(async () => {
+      for await (const _chunk of provider.objectStream!({
+        model: 'gpt-4.1-mini',
+        messages: [{ role: 'user', content: 'object please' }],
+        schema: { type: 'object' },
+        signal: mockSignal()
+      })) {
+        // consume the stream to force the final parse
+      }
+    }).rejects.toMatchObject({
+      constructor: ModelError,
+      meta: {
+        provider: 'openai',
+        model: 'gpt-4.1-mini',
+        method: 'objectStream',
+        reason: 'malformed_response',
+        providerBody: '{"ok":'
+      }
+    })
+  })
+
+  it('rejects invalid tool-call argument JSON with ModelError', async () => {
+    const provider = openai({
+      client: {
+        chat: {
+          completions: {
+            create: async () => ({
+              choices: [
+                {
+                  message: {
+                    content: '',
+                    tool_calls: [{
+                      id: 'call_1',
+                      type: 'function',
+                      function: {
+                        name: 'lookup',
+                        arguments: '{"query":'
+                      }
+                    }]
+                  },
+                  finish_reason: 'tool_calls'
+                }
+              ],
+              usage: { prompt_tokens: 3, completion_tokens: 2 }
+            })
+          }
+        }
+      } as any
+    })
+
+    await expect(
+      provider.text!({
+        model: 'gpt-4.1-mini',
+        messages: [{ role: 'user', content: 'use a tool' }],
+        signal: mockSignal()
+      })
+    ).rejects.toMatchObject({
+      constructor: ModelError,
+      meta: {
+        provider: 'openai',
+        model: 'gpt-4.1-mini',
+        method: 'text',
+        reason: 'malformed_response',
+        providerBody: '{"query":'
       }
     })
   })
@@ -220,7 +343,7 @@ describe('openai provider factory', () => {
       } as any
     })
 
-    await provider.json!({
+    await provider.object!({
       model: 'gpt-5-mini',
       messages: [
         { role: 'user', content: 'read a page' },

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { createShowcaseHarness, ScriptedJsonProvider } from './index.js'
+import { createShowcaseHarness, ScriptedObjectProvider } from './index.js'
 
 describe('showcase harness examples', () => {
   it('runs a typed workflow with a mounted skill', async () => {
-    const provider = new ScriptedJsonProvider()
+    const provider = new ScriptedObjectProvider()
     const { harness } = createShowcaseHarness(provider)
     const session = await harness.getSession('showcase-skills')
 
@@ -17,7 +17,7 @@ describe('showcase harness examples', () => {
   })
 
   it('runs an agent with an explicitly allowed TypeScript tool', async () => {
-    const provider = new ScriptedJsonProvider()
+    const provider = new ScriptedObjectProvider()
     const { harness } = createShowcaseHarness(provider)
     const session = await harness.getSession('showcase-tools')
 

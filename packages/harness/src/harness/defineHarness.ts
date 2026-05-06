@@ -1,13 +1,24 @@
 import { z } from 'zod'
 import { JsonLogger, type Logger } from '../logger/index.js'
 import type {
-  JsonRequest,
-  JsonResponse,
-  JsonStreamChunk,
+  Embedding,
+  EmbeddingRequest,
+  EmbeddingResponse,
   ModelAlias,
   ModelCapability,
   ModelDefaults,
+  ModelFeatureSet,
+  ModelProviderInfo,
   ModelProvider,
+  ObjectRequest,
+  ObjectResponse,
+  ObjectStreamChunk,
+  OutputMode,
+  ContentPartKind,
+  RerankDocument,
+  RerankRequest,
+  RerankResponse,
+  RerankResult,
   TextRequest,
   TextResponse,
   TextStreamChunk,
@@ -29,6 +40,16 @@ import type { HarnessError } from '../errors/harness-error.js'
 import { HarnessConfigError } from '../errors/catalog.js'
 import { autoDetectSandbox, type Sandbox } from '../sandbox/index.js'
 import { createSessionHarness } from '../sessions/index.js'
+import type { ModelHandle } from '../models/registry.js'
+import {
+  hasAdapterCapabilities,
+  missingCapabilities,
+  uniqueCapabilities,
+  type AdapterCapability,
+  type AdapterInspection,
+  type DurableRuntimeAdapter,
+  type HarnessInspection
+} from '../ports/capabilities.js'
 
 /** Stable harness version string for diagnostics and generated documentation. */
 export const HARNESS_VERSION = '0.0.0'
@@ -276,6 +297,13 @@ export type AgentInput<S extends BuilderState, K extends keyof NonNullable<S['ag
 export type AgentOutput<S extends BuilderState, K extends keyof NonNullable<S['agents']>> =
   DefinitionOutput<NonNullable<S['agents']>[K]>
 
+/** Capability-filtered model handles keyed by configured model alias. */
+export type ModelHandles<S extends BuilderState> = {
+  readonly [K in keyof NonNullable<S['models']>]: NonNullable<S['models']>[K] extends { capabilities: readonly ModelCapability[] }
+    ? ModelHandle<NonNullable<S['models']>[K]>
+    : never
+}
+
 /** Minimal context available when deriving dynamic agent instructions. */
 export interface AgentContextMinimal<S extends BuilderState, I> {
   input: I
@@ -289,6 +317,7 @@ export interface AgentContextMinimal<S extends BuilderState, I> {
 export interface WorkflowContext<S extends BuilderState, I, O> {
   input: I
   agents: { [K in keyof NonNullable<S['agents']>]: (input: AgentInput<S, K>, opts?: InvokeOptions) => Promise<AgentOutput<S, K>> }
+  models: ModelHandles<S>
   signal: AbortSignal
   runId: string
   sessionId: string
@@ -297,6 +326,7 @@ export interface WorkflowContext<S extends BuilderState, I, O> {
 
 /** Full context passed to custom agent handlers. */
 export interface AgentContext<S extends BuilderState, I, O> extends AgentContextMinimal<S, I> {
+  models: ModelHandles<S>
   signal: AbortSignal
   output?: O
 }
@@ -444,6 +474,8 @@ export type InferTypes<S extends BuilderState> = {
 export interface Harness<S extends BuilderState> {
   /** Opens or creates a fresh session facade bound to `id`. */
   getSession(id: string): Promise<Session<S>>
+  /** Returns a synchronous, data-only snapshot of resolved adapter setup. */
+  inspect(): HarnessInspection
   /** Closes harness-owned adapters and returns any shutdown errors. */
   shutdown(): Promise<{ errors: HarnessError[] }>
   /** Phantom inference handle. Harness value is always the literal `{}`. */
@@ -477,9 +509,14 @@ export type RunEvent =
   | { type: 'run.finished'; runId: string; at: string; output?: JsonValue; error?: SerializedError }
   | { type: 'agent.started'; runId: string; agentId: string; at: string }
   | { type: 'agent.finished'; runId: string; agentId: string; at: string; output?: JsonValue; error?: SerializedError }
+  | { type: 'model.delta'; runId: string; agentId: string; delta: string }
   | { type: 'tool.started'; runId: string; agentId: string; toolId: string; callId: string; input: JsonValue }
   | { type: 'tool.finished'; runId: string; agentId: string; toolId: string; callId: string; output?: JsonValue; error?: SerializedError }
   | { type: 'model.message'; runId: string; agentId: string; message: Message }
+  | { type: 'model.object.partial'; runId: string; agentId?: string; partial: JsonValue }
+  | { type: 'model.object'; runId: string; agentId?: string; object: JsonValue }
+  | { type: 'model.embedding.completed'; runId: string; agentId?: string; count: number; dimensions?: number; usage?: TokenUsage }
+  | { type: 'model.rerank.completed'; runId: string; agentId?: string; count: number; topN?: number; usage?: TokenUsage }
   | { type: 'stream.overflow'; runId: string; at: string; dropped: number }
 
 /** Fluent builder contract for composing a harness. */
@@ -487,7 +524,9 @@ export interface HarnessBuilder<S extends BuilderState = {}> {
   telemetry(opts: TelemetryOptions): HarnessBuilder<S>
   logger(logger: Logger): HarnessBuilder<S>
   state(store: StateStore): HarnessBuilder<S>
-  sandbox(sandbox?: Sandbox): HarnessBuilder<S>
+  sandbox(sandbox?: Sandbox<any>): HarnessBuilder<S>
+  runtime(runtime: DurableRuntimeAdapter): HarnessBuilder<S>
+  requires(capabilities: readonly AdapterCapability[]): HarnessBuilder<S>
   defaults(defaults: HarnessDefaults): HarnessBuilder<S>
   models<const M extends ModelsConfig>(models: M): HarnessBuilder<S & { models: M }>
   tools<const T extends ToolsConfig>(tools: T): HarnessBuilder<S & { tools: T }>
@@ -509,7 +548,9 @@ type BuilderStateInternal = {
   telemetry?: TelemetryOptions
   logger?: Logger
   state?: StateStore
-  sandbox?: Sandbox
+  sandbox?: Sandbox<any>
+  runtime?: DurableRuntimeAdapter
+  requiredCapabilities?: readonly AdapterCapability[]
   defaults?: HarnessDefaults
   models?: ModelsConfig
   tools?: ToolsConfig
@@ -539,8 +580,16 @@ class Builder<S extends BuilderState> implements HarnessBuilder<S> {
     return this.clone({ state: store })
   }
 
-  public sandbox(sandbox: Sandbox = autoDetectSandbox()): HarnessBuilder<S> {
+  public sandbox(sandbox: Sandbox<any> = autoDetectSandbox()): HarnessBuilder<S> {
     return this.clone({ sandbox })
+  }
+
+  public runtime(runtime: DurableRuntimeAdapter): HarnessBuilder<S> {
+    return this.clone({ runtime })
+  }
+
+  public requires(capabilities: readonly AdapterCapability[]): HarnessBuilder<S> {
+    return this.clone({ requiredCapabilities: uniqueCapabilities(capabilities) })
   }
 
   public defaults(defaults: HarnessDefaults): HarnessBuilder<S> {
@@ -594,13 +643,23 @@ class Builder<S extends BuilderState> implements HarnessBuilder<S> {
     if (!models || Object.keys(models).length === 0) {
       throw new HarnessConfigError('At least one model alias is required.', { reason: 'missing_models', path: 'models' })
     }
+    const sandbox = this.configured.sandbox ?? autoDetectSandbox()
+    const inspection = this.resolveInspection(this.options.name ?? 'agent-harness', sandbox, models)
+    const missing = missingCapabilities(inspection.requiredCapabilities, inspection.capabilities)
+    if (missing.length > 0) {
+      throw new HarnessConfigError('Required adapter capabilities are not available.', {
+        reason: 'missing_required_capability',
+        path: 'requires',
+        id: missing.join(',')
+      })
+    }
 
     const harness = createSessionHarness<S>({
       name: this.options.name ?? 'agent-harness',
       logger: this.configured.logger ?? new JsonLogger(),
       ...(this.configured.telemetry ? { telemetry: this.configured.telemetry } : {}),
       state: this.configured.state ?? new InMemoryStateStore(),
-      sandbox: this.configured.sandbox ?? autoDetectSandbox(),
+      sandbox,
       defaults: {
         agentMaxIterations: this.configured.defaults?.agentMaxIterations ?? 16,
         runTimeoutMs: this.configured.defaults?.runTimeoutMs ?? 600_000,
@@ -613,7 +672,8 @@ class Builder<S extends BuilderState> implements HarnessBuilder<S> {
       tools: (this.configured.tools ?? {}) as NonNullable<S['tools']>,
       skills: (this.configured.skills ?? {}) as NonNullable<S['skills']>,
       agents: (this.configured.agents ?? {}) as NonNullable<S['agents']>,
-      workflows: (this.configured.workflows ?? {}) as NonNullable<S['workflows']>
+      workflows: (this.configured.workflows ?? {}) as NonNullable<S['workflows']>,
+      inspection
     })
 
     return harness
@@ -622,6 +682,54 @@ class Builder<S extends BuilderState> implements HarnessBuilder<S> {
   private clone(patch: Partial<BuilderStateInternal>): Builder<S> {
     return new Builder(this.options, { ...this.configured, ...patch })
   }
+
+  private resolveInspection(name: string, sandbox: Sandbox, models: ModelsConfig): HarnessInspection {
+    const adapters: AdapterInspection[] = []
+    const sandboxCapabilities = hasAdapterCapabilities(sandbox) ? uniqueCapabilities(sandbox.capabilities) : []
+    adapters.push({
+      kind: 'sandbox',
+      id: getAdapterId(sandbox, 'sandbox'),
+      capabilities: sandboxCapabilities
+    })
+
+    if (this.configured.runtime) {
+      adapters.push({
+        kind: 'runtime',
+        id: this.configured.runtime.id ?? 'runtime',
+        capabilities: uniqueCapabilities(this.configured.runtime.capabilities)
+      })
+    }
+
+    for (const [alias, model] of Object.entries(models)) {
+      adapters.push({
+        kind: 'model',
+        id: alias,
+        capabilities: [],
+        metadata: {
+          providerId: model.provider.id,
+          genAiSystem: model.provider.genAiSystem,
+          model: model.model,
+          modelCapabilities: model.capabilities,
+          ...(model.provider.info ? { providerInfo: model.provider.info } : {})
+        }
+      })
+    }
+
+    const capabilities = uniqueCapabilities(adapters.flatMap((adapter) => adapter.capabilities))
+    return {
+      name,
+      capabilities,
+      requiredCapabilities: uniqueCapabilities(this.configured.requiredCapabilities ?? []),
+      adapters
+    }
+  }
+}
+
+function getAdapterId(adapter: unknown, fallback: string): string {
+  if (adapter && typeof adapter === 'object' && typeof (adapter as { id?: unknown }).id === 'string') {
+    return (adapter as { id: string }).id
+  }
+  return fallback
 }
 
 /**
@@ -633,7 +741,7 @@ class Builder<S extends BuilderState> implements HarnessBuilder<S> {
  * @example
  * ```ts
  * const harness = defineHarness()
- *   .models({ fast: { provider, model: 'gpt-4.1-mini', capabilities: ['json'] } })
+ *   .models({ fast: { provider, model: 'gpt-4.1-mini', capabilities: ['object'] } })
  *   .agents({ summarize: { model: 'fast', instructions: 'Summarize the input.' } })
  *   .workflows({
  *     summarize_ticket: {

@@ -11,14 +11,14 @@ const harness = defineHarness({ name: 'my-service' })
     fast: {
       provider: openai({ apiKey: process.env.OPENAI_API_KEY! }),
       model: process.env.OPENAI_MODEL ?? 'gpt-5-mini',
-      capabilities: ['json']
+      capabilities: ['object']
     }
   })
   .agents(({ agent }) => ({
     assistant: agent({
       model: 'fast',
       builtinTools: false,
-      instructions: 'Return concise JSON.'
+      instructions: 'Return a concise object.'
     })
   }))
   .build()
@@ -61,7 +61,7 @@ flowchart LR
       project: process.env.OPENAI_PROJECT
     }),
     model: process.env.OPENAI_MODEL ?? 'gpt-5-mini',
-    capabilities: ['json', 'tool_use'],
+    capabilities: ['object', 'tool_use'],
     defaults: { maxTokens: 1200 }
   }
 })
@@ -73,10 +73,14 @@ Capabilities gate runtime calls:
 |---|---|
 | `text` | Plain text generation. |
 | `text_stream` | Plain text streaming. |
-| `json` | Structured JSON generation. |
-| `json_stream` | Structured JSON streaming. |
+| `object` | Structured object generation validated against the requested schema. |
+| `object_stream` | Structured object streaming as typed provider chunks and harness run events. |
 | `tool_use` | Model tool calling. |
 | `vision_input` | Image input understanding where adapter supports it. |
+| `audio_input` | Audio input understanding where adapter supports it. |
+| `file_input` | File input understanding where adapter supports it. |
+| `embeddings` | Embedding vector generation for retrieval workflows. |
+| `rerank` | Document reranking for retrieval workflows. |
 
 ## Defaults
 

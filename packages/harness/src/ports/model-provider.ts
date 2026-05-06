@@ -8,14 +8,22 @@ export type ModelCapability =
   'text'
   /** Streaming plain text generation. */
   | 'text_stream'
-  /** Synchronous structured JSON generation. */
-  | 'json'
-  /** Streaming structured JSON generation. */
-  | 'json_stream'
+  /** Synchronous structured object generation. */
+  | 'object'
+  /** Streaming structured object generation. */
+  | 'object_stream'
   /** Function/tool calling support. */
   | 'tool_use'
   /** Image input understanding. */
   | 'vision_input'
+  /** Audio input understanding. */
+  | 'audio_input'
+  /** File input understanding. */
+  | 'file_input'
+  /** Embedding vector generation. */
+  | 'embeddings'
+  /** Document reranking. */
+  | 'rerank'
 
 /** Default generation parameters applied per alias. */
 export interface ModelDefaults {
@@ -48,6 +56,38 @@ export type ContentPart =
   | { kind: 'text'; text: string }
   /** Inline image content encoded as base64 data. */
   | { kind: 'image'; mimeType: string; dataBase64: string }
+  /** Remote image reference. */
+  | { kind: 'image_url'; url: string; mimeType?: string }
+  /** Inline audio content encoded as base64 data. */
+  | { kind: 'audio'; mimeType: string; dataBase64: string }
+  /** Inline file content encoded as base64 data. */
+  | { kind: 'file'; mimeType: string; dataBase64: string; filename?: string }
+  /** Remote file reference. */
+  | { kind: 'file_url'; url: string; mimeType?: string; filename?: string }
+
+/** Optional data-only model feature descriptor exposed by provider packages. */
+export interface ModelProviderInfo {
+  providerId: string
+  genAiSystem: string
+  packageName?: string
+  packageVersion?: string
+  models?: Record<string, ModelFeatureSet>
+}
+
+/** Static capabilities known for a provider model. */
+export interface ModelFeatureSet {
+  capabilities: readonly ModelCapability[]
+  contextWindow?: number
+  maxOutputTokens?: number
+  supportedInputParts?: readonly ContentPartKind[]
+  supportedOutputModes?: readonly OutputMode[]
+}
+
+/** Provider-neutral input content part kinds. */
+export type ContentPartKind = 'text' | 'image' | 'audio' | 'file'
+
+/** Provider-neutral output operation modes. */
+export type OutputMode = 'text' | 'object' | 'embedding' | 'rerank'
 
 /** Message schema shared across provider adapters. */
 export type ModelMessage =
@@ -113,35 +153,96 @@ export type TextStreamChunk =
   | { kind: 'tool_call'; call: ToolCallSpec }
   | { kind: 'finish'; usage: TokenUsage; finishReason: FinishReason }
 
-/** Request for json/json-stream model methods. */
-export interface JsonRequest extends BaseRequest {
+/** Request for object/object-stream model methods. */
+export interface ObjectRequest<T extends JsonValue = JsonValue> extends BaseRequest {
   schema: JsonValue
+  schemaName?: string
   tools?: ModelToolSpec[] | undefined
 }
 
-/** Response from synchronous JSON generation. */
-export interface JsonResponse {
-  data: JsonValue
+/** Response from synchronous structured object generation. */
+export interface ObjectResponse<T extends JsonValue = JsonValue> {
+  object: T
   toolCalls?: ToolCallSpec[]
   usage: TokenUsage
   finishReason: FinishReason
   raw?: unknown
 }
 
-/** Stream chunk from json-stream generation. */
-export type JsonStreamChunk =
-  | { kind: 'partial'; data: JsonValue }
+/** Stream chunk from structured object streaming. */
+export type ObjectStreamChunk<T extends JsonValue = JsonValue> =
+  | { kind: 'partial'; partial: JsonValue }
+  | { kind: 'delta'; path: readonly (string | number)[]; value: JsonValue }
   | { kind: 'tool_call'; call: ToolCallSpec }
-  | { kind: 'finish'; data: JsonValue; usage: TokenUsage; finishReason: FinishReason }
+  | { kind: 'finish'; object: T; usage: TokenUsage; finishReason: FinishReason }
+
+/** Request for embedding generation. */
+export interface EmbeddingRequest {
+  model: string
+  input: string | readonly string[]
+  dimensions?: number
+  call?: ModelCallOptions | undefined
+  signal: AbortSignal
+  traceparent?: string | undefined
+}
+
+/** Response from embedding generation. */
+export interface EmbeddingResponse {
+  embeddings: readonly Embedding[]
+  usage: TokenUsage
+  raw?: unknown
+}
+
+/** Single embedding vector with input-order index. */
+export interface Embedding {
+  index: number
+  vector: readonly number[]
+}
+
+/** Request for document reranking. */
+export interface RerankRequest {
+  model: string
+  query: string
+  documents: readonly RerankDocument[]
+  topN?: number
+  call?: ModelCallOptions | undefined
+  signal: AbortSignal
+  traceparent?: string | undefined
+}
+
+/** Rerankable document. */
+export interface RerankDocument {
+  id: string
+  text: string
+  metadata?: Record<string, JsonValue>
+}
+
+/** Response from document reranking. */
+export interface RerankResponse {
+  results: readonly RerankResult[]
+  usage?: TokenUsage
+  raw?: unknown
+}
+
+/** Single rerank result referencing one submitted document. */
+export interface RerankResult {
+  id: string
+  index: number
+  score: number
+  metadata?: Record<string, JsonValue>
+}
 
 /** Provider adapter interface implemented by packages such as `@purista/harness-openai`. */
 export interface ModelProvider {
   readonly id: string
   readonly genAiSystem: string
+  readonly info?: ModelProviderInfo
   text?(req: TextRequest): Promise<TextResponse>
   textStream?(req: TextRequest): AsyncIterable<TextStreamChunk>
-  json?(req: JsonRequest): Promise<JsonResponse>
-  jsonStream?(req: JsonRequest): AsyncIterable<JsonStreamChunk>
+  object?<T extends JsonValue = JsonValue>(req: ObjectRequest<T>): Promise<ObjectResponse<T>>
+  objectStream?<T extends JsonValue = JsonValue>(req: ObjectRequest<T>): AsyncIterable<ObjectStreamChunk<T>>
+  embed?(req: EmbeddingRequest): Promise<EmbeddingResponse>
+  rerank?(req: RerankRequest): Promise<RerankResponse>
   close?(): Promise<void>
 }
 

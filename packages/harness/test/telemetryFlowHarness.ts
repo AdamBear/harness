@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { SpanStatusCode, type Span } from '@opentelemetry/api'
 
 import { JsonLogger } from '../src/logger/index.js'
-import type { JsonResponse, ModelProvider } from '../src/ports/model-provider.js'
+import type { ObjectResponse, ModelProvider } from '../src/ports/model-provider.js'
 import { InMemoryStateStore } from '../src/state/in-memory.js'
 import { inMemorySandbox } from '../src/sandbox/index.js'
 import { createSessionHarness } from '../src/sessions/index.js'
@@ -67,18 +67,18 @@ class FlowModelProvider implements ModelProvider {
   public readonly genAiSystem = 'fake'
   private calls = 0
 
-  public async json(): Promise<JsonResponse> {
+  public async object(): Promise<ObjectResponse> {
     this.calls += 1
     if (this.calls === 1) {
       return {
-        data: {},
+        object: {},
         toolCalls: [{ id: 'call-1', name: 'policy_lookup', arguments: { query: 'policy' } }],
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
         finishReason: 'tool_calls'
       }
     }
     return {
-      data: { answer: 'Policy says yes.' },
+      object: { answer: 'Policy says yes.' },
       usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
       finishReason: 'stop'
     }
@@ -101,7 +101,7 @@ export async function runTelemetryFlowHarness(opts: { failTool?: boolean } = {})
       modelTimeoutMs: 60_000
     },
     models: {
-      fast: { provider: new FlowModelProvider(), model: 'fake', capabilities: ['json', 'tool_use'] }
+      fast: { provider: new FlowModelProvider(), model: 'fake', capabilities: ['object', 'tool_use'] }
     },
     tools: {
       policy_lookup: {

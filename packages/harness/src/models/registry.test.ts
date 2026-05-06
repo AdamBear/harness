@@ -20,11 +20,20 @@ class FakeProvider implements ModelProvider {
 describe('createModelRegistry', () => {
   it('gates missing capability', async () => {
     const registry = createModelRegistry({
-      a: { provider: new FakeProvider(), model: 'm', capabilities: ['json'] }
+      a: { provider: new FakeProvider(), model: 'm', capabilities: ['object'] }
     })
-    const handle = registry['a']
+    const handle = registry['a'] as any
 
     expect(() => handle?.text({ messages: [], call: {} }, AbortSignal.abort())).toThrow(ModelCapabilityError)
+  })
+
+  it('gates multimodal content part capabilities', async () => {
+    const registry = createModelRegistry({
+      a: { provider: new FakeProvider(), model: 'm', capabilities: ['text'] }
+    })
+    const handle = registry['a'] as any
+
+    expect(() => handle?.text({ messages: [{ role: 'user', content: [{ kind: 'audio', mimeType: 'audio/wav', dataBase64: 'abc' }] }] }, AbortSignal.abort())).toThrow(ModelCapabilityError)
   })
 
   it('gates missing provider method when claimed', async () => {

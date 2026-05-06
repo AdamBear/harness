@@ -73,12 +73,12 @@ Adds:
 
 ### `{operation_name} {request.model}` (GenAI conv — model call)
 
-`operation_name` is one of `chat`, `text_completion`, `embeddings`. The default loop uses `chat`.
+`operation_name` is one of `chat`, `text_completion`, `embeddings`, `rerank`, or provider-neutral `object_generation` when a provider cannot map object generation to a chat operation. The default loop uses object generation and may still emit a `chat {request.model}` GenAI span when the underlying provider implements object generation through chat completions.
 
 | Key                                  | Type     |
 |--------------------------------------|----------|
 | `gen_ai.system`                      | string — provider-declared (e.g. `'openai'`, `'anthropic'`, `'azure.ai.openai'`). The harness asserts the provider sets this. |
-| `gen_ai.operation.name`              | string — `'chat' \| 'text_completion' \| 'embeddings'` |
+| `gen_ai.operation.name`              | string — `'chat' \| 'text_completion' \| 'embeddings' \| 'rerank' \| 'object_generation'` |
 | `gen_ai.request.model`               | string — alias's `model` field |
 | `gen_ai.response.model`              | string — when known |
 | `gen_ai.request.temperature`         | double — when set |
@@ -91,7 +91,7 @@ Adds:
 | `gen_ai.usage.input_tokens`          | integer |
 | `gen_ai.usage.output_tokens`         | integer |
 | `harness.model.alias`                | string  |
-| `harness.model.method`               | string — `'text' \| 'text_stream' \| 'json' \| 'json_stream'` |
+| `harness.model.method`               | string — `'text' \| 'text_stream' \| 'object' \| 'object_stream' \| 'embed' \| 'rerank'` |
 
 ### `execute_tool {tool.name}` (GenAI conv)
 
@@ -130,13 +130,19 @@ Spans use status `OK` on success and `ERROR` on failure; on failure, `recordExce
 
 ## GenAI events on `chat` span
 
-Per the GenAI conv, the harness emits these span events on the `chat`/`text_completion`/`embeddings` span:
+Per the GenAI conv, the harness emits these span events on the `chat`/`text_completion`/`embeddings`/`rerank`/`object_generation` span when the operation has matching message content:
 
 - `gen_ai.system.message` — body `{role:'system', content}` per system message present.
 - `gen_ai.user.message` — body `{role:'user', content}`.
 - `gen_ai.assistant.message` — body `{role:'assistant', content, tool_calls?}`.
 - `gen_ai.tool.message` — body `{role:'tool', id, content}`.
 - `gen_ai.choice` — body `{index, finish_reason, message: {role:'assistant', content?, tool_calls?}}`.
+
+For `object`/`object_stream`, the choice body uses `message.content` only when
+`telemetry.captureContent === true`; otherwise structured object content is
+reported as `null` and operational metadata remains on attributes and metrics.
+For `embed` and `rerank`, prompt/document content is omitted unless
+`telemetry.captureContent === true`.
 
 ### Privacy gate (`telemetry.captureContent`)
 

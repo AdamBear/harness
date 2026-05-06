@@ -1,7 +1,10 @@
 import { defineHarness } from '../harness/defineHarness.js'
 
 export { FakeModelProvider } from './fakeModelProvider.js'
+export { adapterCapabilitiesContract, fakeCapabilityAdapter, type FakeCapabilityAdapter } from './capabilities.js'
+export { createInMemoryFeedbackRecorder } from './feedback.js'
 export { sandboxContract } from './sandboxContract.js'
+export { fakeSnapshotSandbox, sandboxSnapshotContract } from './sandboxSnapshot.js'
 export { stateStoreContract } from './stateStoreContract.js'
 
 /** Returns a fresh harness builder for tests. */

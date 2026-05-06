@@ -7,6 +7,8 @@ The harness gives PURISTA applications a typed runtime boundary for:
 
 - direct agent invocation through `session.agents`;
 - workflow orchestration through `session.workflows`;
+- provider-neutral text, structured object, multimodal, embedding, and rerank
+  model operations;
 - TypeScript, built-in, and MCP tools;
 - reusable skills;
 - state, sandboxing, logs, traces, and run events;

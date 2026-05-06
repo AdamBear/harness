@@ -18,7 +18,7 @@ The methods MUST be called in this order, each at most once:
 
 ```
 defineHarness(opts?)
-  .telemetry(...)?  .logger(...)?  .state(...)?  .sandbox(...)?  .defaults(...)?
+  .telemetry(...)?  .logger(...)?  .state(...)?  .sandbox(...)?  .runtime(...)?  .requires(...)?  .defaults(...)?
   .models({...})            // REQUIRED, before tools/skills/agents/workflows
   .tools({...})?            // before agents
   .skills({...})?           // before agents
@@ -31,6 +31,7 @@ defineHarness(opts?)
 - `tools()` and `skills()` MUST be called before `agents()` (each may be omitted; the agent's allowed lists then come from an empty registry).
 - `agents()` MUST be called before `workflows()`.
 - Each of `models`/`tools`/`skills`/`agents`/`workflows` is callable AT MOST ONCE.
+- `.runtime(...)` and `.requires(...)` are optional adapter-policy stages. They may be called before `.build()` and do not change the domain ordering.
 - Calling out of order or twice is a TYPE error: each builder method returns a sub-builder type that omits methods which are no longer valid (already-set or out-of-order).
 - `build()` is only present on builder types that have at least `models` set AND at least one of `agents`/`workflows` set.
 
@@ -72,6 +73,29 @@ Pass a `StateStore`. Default: `InMemoryStateStore`.
 ### `.sandbox(sandbox?)`
 
 Pass a `Sandbox`. If omitted, or called with no argument, the harness auto-detects: tries `bashSandbox()` first; on import failure (the `just-bash` peer dep is not installed), falls back to `inMemorySandbox()`. See [05-sandbox](./05-sandbox.md).
+
+### `.runtime(runtime)`
+
+Pass an optional durable runtime adapter descriptor. Core treats durable runtime
+support as an opt-in adapter capability surface, not a mandatory worker or
+queue. Runtime adapters declare `capabilities`; checkpoint, retry, lock, and
+resume semantics stay owned by the runtime adapter.
+
+### `.requires(capabilities)`
+
+Declares adapter capabilities required by this harness definition:
+
+```ts
+defineHarness()
+  .sandbox(snapshotSandbox)
+  .runtime(durableRuntime)
+  .requires(['sandbox.snapshot', 'sandbox.resume', 'runtime.checkpoint'])
+```
+
+`build()` aggregates capabilities from configured adapters and throws
+`HarnessConfigError{meta.reason:'missing_required_capability'}` when any
+required capability is unavailable. This gate is construction-time policy; a run
+must not start with an unsupported adapter combination.
 
 ### `.defaults(d)`
 
@@ -222,7 +246,7 @@ Cross-key constraints are enforced by the type system; harness additionally re-c
 - If `builtinTools` is an array, every entry MUST be one of `'bash'|'read'|'write'|'edit'|'glob'|'grep'|'list'`; unknown name → `HarnessConfigError`.
 - If `permissions.bash` is set but the configured sandbox's executor will be unavailable at harness, the bash policy is still parsed but warning-logged (permissions for an unavailable tool are no-ops).
 - `maxSteps`: positive integer, ≤64; otherwise `HarnessConfigError`.
-- For agents WITHOUT a custom handler: the referenced model alias's `capabilities` MUST include `'json'`. If the agent declares any `tools` OR has any built-in tools enabled, the alias MUST additionally include `'tool_use'`. Violation → `HarnessConfigError{meta.reason:'agent_model_capability_mismatch'}`.
+- For agents WITHOUT a custom handler: the referenced model alias's `capabilities` MUST include `'object'`. If the agent declares any `tools` OR has any built-in tools enabled, the alias MUST additionally include `'tool_use'`. Violation → `HarnessConfigError{meta.reason:'agent_model_capability_mismatch'}`.
 
 ### `.workflows(workflows)`
 
@@ -275,17 +299,22 @@ Returns the immutable `Harness<S>` (see [13-public-api](./13-public-api.md)). Av
 5. For every skill: `SKILL.md` parsed, frontmatter validated, config key equals frontmatter `name` — checked in `.skills()`.
 6. Tool/skill/agent/workflow/model-alias keys MUST match `/^[a-z][a-z0-9_]*$/`, ≤64 chars; reserved prefixes `harness_`/`system_` rejected; cross-namespace collisions (tool vs skill, tool vs built-in name) and reserved Session member collisions (workflows) rejected.
 7. `defaults.runTimeoutMs === 0` disables the run timeout. Per-call timeouts must be > 0; negative values rejected. `InvokeOptions.timeoutMs` follows the same `>0/0/<0` rules: negative throws `ValidationError`.
-8. Default-loop agents need `'json'` capability on their alias; `'tool_use'` if any custom tools or any built-in tools enabled — checked in `.agents()`.
+8. Default-loop agents need `'object'` capability on their alias; `'tool_use'` if any custom tools or any built-in tools enabled — checked in `.agents()`.
 9. `defaults.historyWindow`: `undefined`/`0`/positive int OK; negative → `HarnessConfigError`. Same rules apply to `InvokeOptions.historyWindow` (negative throws `ValidationError{where:'invoke_options'}`).
 10. `agent.builtinTools` if an array MUST contain only valid built-in names; `agent.maxSteps` if set MUST be in `[1, 64]`.
+11. `.requires(...)` entries MUST be stable `AdapterCapability` values and MUST be provided by configured adapters by `.build()`.
 
 ## `Harness<S>` returned object
 
-The builder's `.build()` returns the typed `Harness<S>`. The full type surface (including `$infer` and `getSession`) is locked in [13-public-api](./13-public-api.md).
+The builder's `.build()` returns the typed `Harness<S>`. The full type surface (including `$infer`, `getSession`, and `inspect`) is locked in [13-public-api](./13-public-api.md).
 
 `getSession` is `async` because the StateStore may be remote.
 
 `shutdown()` calls `.close()` on every adapter that has the method (state, sandbox, logger, every model provider). Every adapter's `close()` runs regardless of individual failures. Errors are aggregated and returned in `errors`. Errors are also logged at `error` level. Resolves when all attempts finish.
+
+`inspect()` returns a synchronous, data-only snapshot of the resolved harness
+setup: harness name, effective adapter capabilities, required capabilities, and
+adapter descriptors. It must not make network calls or mutate runtime state.
 
 ## Cross-references
 

@@ -31,9 +31,9 @@ npm run build
 const provider = {
   id: 'fake',
   genAiSystem: 'fake',
-  async json() {
+  async object() {
     return {
-      data: { answer: 'fake answer', citations: [] },
+      object: { answer: 'fake answer', citations: [] },
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       finishReason: 'stop'
     }

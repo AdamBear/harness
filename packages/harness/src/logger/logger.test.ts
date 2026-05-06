@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { context, trace } from '@opentelemetry/api'
+import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks'
 
 import { JsonLogger } from './json-logger.js'
 
@@ -50,5 +52,37 @@ describe('JsonLogger', () => {
     expect(out.lines).toHaveLength(2)
     expect(JSON.parse(out.lines[0] ?? '{}')['level']).toBe('warn')
     expect(JSON.parse(out.lines[1] ?? '{}')['msg']).toBe('kept')
+  })
+
+  it('redacts sensitive fields and does not throw when output fails', () => {
+    const out = new MemoryStream()
+    const logger = new JsonLogger({ out, level: 'trace' })
+    logger.error('secret', { authorization: 'Bearer sk_live_secret', nested: { apiKey: 'sk_live_secret' } })
+    expect(out.lines.join('')).not.toContain('sk_live_secret')
+    expect(out.lines.join('')).toContain('[redacted]')
+
+    const throwing = new JsonLogger({ level: 'trace', out: { write: () => { throw new Error('sink failed') } } })
+    expect(() => throwing.info('still safe', { token: 'secret-token' })).not.toThrow()
+  })
+
+  it('adds active trace and span ids', () => {
+    context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable())
+    const out = new MemoryStream()
+    const logger = new JsonLogger({ out, level: 'trace' })
+    try {
+      context.with(trace.setSpanContext(context.active(), {
+        traceId: '00000000000000000000000000000001',
+        spanId: '0000000000000002',
+        traceFlags: 1
+      }), () => {
+        logger.info('with trace')
+      })
+    } finally {
+      context.disable()
+    }
+
+    const line = JSON.parse(out.lines[0] ?? '{}') as Record<string, string>
+    expect(line['trace_id']).toBe('00000000000000000000000000000001')
+    expect(line['span_id']).toBe('0000000000000002')
   })
 })

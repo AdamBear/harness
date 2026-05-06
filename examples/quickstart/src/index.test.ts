@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import type { JsonResponse, ModelProvider } from '@purista/harness'
+import type { JsonValue, ModelProvider, ObjectRequest, ObjectResponse } from '@purista/harness'
 import { createQuickstartHarness } from './index.js'
 
 class ExampleProvider implements ModelProvider {
   readonly id = 'example'
   readonly genAiSystem = 'example'
 
-  async json(): Promise<JsonResponse> {
+  async object<T extends JsonValue = JsonValue>(_req: ObjectRequest<T>): Promise<ObjectResponse<T>> {
     return {
-      data: { answer: 'A harness wires providers, agents, workflows, and sessions behind typed boundaries.' },
+      object: { answer: 'A harness wires providers, agents, workflows, and sessions behind typed boundaries.' } as unknown as T,
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       finishReason: 'stop'
     }

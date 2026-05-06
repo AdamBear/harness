@@ -43,7 +43,7 @@ const harness = defineHarness({ name: 'docs-example' })
     fast: {
       provider: openai({ apiKey: process.env.OPENAI_API_KEY! }),
       model: process.env.OPENAI_MODEL ?? 'gpt-5-mini',
-      capabilities: ['json', 'tool_use']
+      capabilities: ['object', 'tool_use']
     }
   })
   .tools({
@@ -63,7 +63,7 @@ const harness = defineHarness({ name: 'docs-example' })
       output: answerOutput,
       tools: ['search_docs'],
       builtinTools: false,
-      instructions: 'Search docs before answering. Return cited JSON.'
+      instructions: 'Search docs before answering. Return a cited object.'
     })
   }))
   .workflows(({ workflow }) => ({
@@ -124,6 +124,42 @@ for await (const event of session.agents.answerer.stream({
 Streaming reports lifecycle and tool events. If your provider and agent path
 support model streaming, render partial content as it arrives; otherwise render
 tool progress and final output.
+
+Harness streams are typed `RunEvent` values. They are not the Vercel stream
+protocol; application HTTP or SSE routes can map them to whatever client event
+shape they own.
+
+## Use Provider Runtime Capabilities
+
+Declare the model operations each alias may use. Structured outputs use the
+`object` vocabulary; legacy `json` capability names should not appear in new
+docs or examples.
+
+```ts
+.models({
+  reasoning: {
+    provider: openai({ apiKey: process.env.OPENAI_API_KEY! }),
+    model: process.env.OPENAI_MODEL ?? 'gpt-5-mini',
+    capabilities: ['text', 'object', 'object_stream', 'tool_use', 'vision_input']
+  },
+  retrieval: {
+    provider: openai({ apiKey: process.env.OPENAI_API_KEY! }),
+    model: process.env.OPENAI_EMBEDDING_MODEL ?? 'text-embedding-3-small',
+    capabilities: ['embeddings']
+  },
+  ranker: {
+    provider: customRanker,
+    model: 'ranker-v1',
+    capabilities: ['rerank']
+  }
+})
+```
+
+Object generation is the typed structured-output path. Multimodal inputs are
+normal model message parts, gated by `vision_input`, `audio_input`, or
+`file_input` depending on the part kind. Embeddings and reranking are provider
+operations for retrieval workflows; vector storage and RAG orchestration remain
+application or workflow code.
 
 ## Invoke A Workflow
 

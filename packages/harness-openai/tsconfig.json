@@ -3,6 +3,8 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
+    "declarationMap": false,
+    "sourceMap": false,
     "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*.ts"]

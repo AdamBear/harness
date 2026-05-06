@@ -1,33 +1,51 @@
 status: approved
 human_approval:
   status: approved
+  approved_at: "2026-05-06"
 scope:
-  spec: specs/19-living-wiki-intelligence-workspace.md
-  plan: plans/living-wiki-intelligence-workspace-plan.md
+  specs:
+    - specs/00-overview.md
+    - specs/01-architecture.md
+    - specs/02-harness-config.md
+    - specs/03-foundation.md
+    - specs/04-state-queue-stream.md
+    - specs/05-sandbox.md
+    - specs/06-models.md
+    - specs/07-tools.md
+    - specs/08-skills.md
+    - specs/09-agents.md
+    - specs/10-workflows.md
+    - specs/11-sessions.md
+    - specs/12-streaming.md
+    - specs/13-public-api.md
+    - specs/14-otel-conventions.md
+    - specs/15-error-catalog.md
+    - specs/16-testing.md
+    - specs/17-implementation-plan.md
+    - specs/18-living-wiki-jaeger-example.md
 summary:
-  updated_at: "2026-05-05"
-  purpose: "Refactor the Living Wiki Jaeger example into a research intelligence workspace and add executable MCP support."
+  updated_at: "2026-05-06"
+  purpose: "Approve the consolidated harness spec set as the current source of truth."
 blocking_decisions: []
-inferred_defaults:
-  - "MCP stdio clients are owned per local tool id for this wave; shared server pooling is deferred until a shared server config exists."
-  - "MCP SDK loading is dynamic so TS-only harnesses do not load MCP code."
-  - "Direct one-agent invocation is allowed through session.agents; multi-agent orchestration remains workflow-owned."
-  - "Real OpenAI, draw.io MCP, and Jaeger checks are opt-in and skipped by default."
+confirmed_decisions:
+  - ".runtime(...), .requires(...), and harness.inspect() are approved public names for adapter capability policy."
+  - "object/object_stream are the approved public provider operation names replacing json/json_stream."
+  - "Embeddings and reranking belong on the model provider port, not on agents or workflows."
+  - "Capabilities are policy: absent operation capabilities remove methods; absent marker capabilities remove related request shapes."
+  - "Sandbox capabilities are policy: files-only sandbox sessions do not expose exec in precise TypeScript types."
+  - "RunEvent remains the internal stream/event surface for PURISTA integration."
+inferred_defaults: []
 gate_simulation:
   status: passed
   notes:
-    - "Plan now defines wave dependencies, ticket metadata, read/write scopes, verification, and non-overlap boundaries."
-    - "Spec now defines direct agent invocation, review decisions, artifact manifests, graph payloads, MCP runtime semantics, and workflow output contracts."
-    - "Human approval was granted on 2026-05-05 before implementation started."
+    - "Append-only specs and plan documents were consolidated into the numbered core specs."
+    - "Provider runtime parity and adapter capability policy are active spec requirements."
+    - "Living Wiki Jaeger and Intelligence Workspace requirements are consolidated into specs/18-living-wiki-jaeger-example.md."
 deterministic_check:
-  command: "node skills/spec-architect/scripts/check_specs.mjs specs"
-  status: not_run
-  reason: "No repo-local skills/spec-architect script path exists in this checkout."
-confidence: medium
-risks:
-  - "MCP SDK transport APIs may require small implementation adjustments while preserving the locked public behavior."
-  - "Existing code currently differs from the final MCP auth union and direct-agent spec updates; A0 must land before runtime tickets."
+  command: "rg -n \"19-living-wiki-intelligence-workspace|Living Wiki Intelligence Workspace And MCP Refactor|superseded by \\[19|specs/19-living\" specs README.md docs examples/living-wiki-jaeger/README.md"
+  status: passed
+confidence: high
+risks: []
 statistics:
-  specs_updated: 8
-  plans_added: 1
-  new_spec_files: 1
+  specs_approved: 19
+  plans_approved: 0

@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { inMemorySandbox } from '../src/sandbox/index.js'
 import { invokeBuiltinTool } from '../src/tools/index.js'
-import { SandboxNoExecutorError } from '../src/errors/index.js'
+import { SandboxNoExecutorError, ValidationError } from '../src/errors/index.js'
 
 it('dispatches alias and enforces bash availability', async () => {
   const session = await inMemorySandbox().open({ sessionId: 's1', runId: 'r1' })
@@ -14,4 +14,34 @@ it('grep falls back to read+match when executor unavailable', async () => {
   const result = await invokeBuiltinTool('grep', { pattern: 'hello', path: '/workspace', maxResults: 10 }, session) as { matches: Array<{ path: string }> }
   expect(result.matches.length).toBe(2)
   expect(result.matches.every((m) => m.path === '/workspace/a.txt')).toBe(true)
+})
+
+it('grep scans through sandbox fs APIs when executor is available', async () => {
+  const session = await inMemorySandbox().open({ sessionId: 's1', runId: 'r1' })
+  await session.write('/workspace/a.txt', 'safe\nneedle')
+
+  const execCalls: string[] = []
+  Object.defineProperty(session, 'executor', { value: 'available' })
+  session.exec = async (command) => {
+    execCalls.push(command)
+    return { stdout: '/tmp/pwned:1:pwned', stderr: '', exitCode: 0, durationSeconds: 0 }
+  }
+
+  const result = await invokeBuiltinTool(
+    'grep',
+    { pattern: 'needle"; touch /tmp/pwned; echo "', path: '/workspace; touch /tmp/path-pwned', maxResults: 10 },
+    session
+  ) as { matches: Array<{ path: string }> }
+
+  expect(result.matches).toEqual([])
+  expect(execCalls).toEqual([])
+})
+
+it('grep converts invalid regex patterns into tool input validation errors', async () => {
+  const session = await inMemorySandbox().open({ sessionId: 's1', runId: 'r1' })
+
+  await expect(invokeBuiltinTool('grep', { pattern: '[', path: '/workspace' }, session)).rejects.toMatchObject({
+    meta: { where: 'tool_input' }
+  })
+  await expect(invokeBuiltinTool('grep', { pattern: '[', path: '/workspace' }, session)).rejects.toBeInstanceOf(ValidationError)
 })

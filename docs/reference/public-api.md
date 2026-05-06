@@ -14,6 +14,8 @@ full contract is specified in [specs/13-public-api.md](../../specs/13-public-api
 
 ```ts
 const harness = defineHarness({ name: 'my-service' })
+  .runtime(...)
+  .requires(...)
   .models(...)
   .tools(...)
   .skills(...)
@@ -27,18 +29,43 @@ const report = await session.workflows.research_report.prompt(input)
 await harness.shutdown()
 ```
 
+`runtime(...)` and `requires(...)` are optional. Omit them for the simple
+in-process default.
+
 ## Main Types
 
 | Type | What It Represents |
 |---|---|
 | `Harness<S>` | Built runtime with `getSession`, `shutdown`, and `$infer`. |
+| `HarnessInspection` | Data-only adapter and capability snapshot returned by `harness.inspect()`. |
 | `Session<S>` | Operational context exposing `agents`, `workflows`, `history`, `memory`, and `close`. |
 | `AgentInvoker` | `prompt(input)` and `stream(input)` for direct agent runs. |
 | `WorkflowInvoker` | `prompt(input)` and `stream(input)` for workflow runs. |
-| `ModelProvider` | Adapter interface implemented by provider packages. |
+| `ModelProvider` | Adapter interface implemented by provider packages for text, object, multimodal, embedding, and rerank operations. |
 | `StateStore` | Persistence port for sessions, runs, messages, and events. |
 | `Sandbox` / `SandboxSession` | File and optional command execution boundary. |
 | `ToolDefinition` | TypeScript, MCP stdio, or MCP HTTP tool config. |
+| `AdapterCapability` | Stable non-model adapter capability id such as `sandbox.snapshot` or `runtime.checkpoint`. |
+| `DurableRuntime` | Optional checkpoint/lease runtime contract for durable use cases. |
+| `FeedbackRecord` | Optional feedback signal attached to harness-native ids. |
+
+## Adapter Capabilities
+
+```ts
+const harness = defineHarness()
+  .runtime(inMemoryDurableRuntime())
+  .requires(['sandbox.fs', 'runtime.checkpoint'])
+  .models(...)
+  .agents(...)
+  .build()
+
+const inspection = harness.inspect()
+console.log(inspection.capabilities)
+```
+
+`harness.inspect()` is synchronous and data-only. It does not open sessions,
+call networks, or mutate adapters. Missing required adapter capabilities fail
+during `build()` with `HarnessConfigError`.
 
 ## Tool Definitions
 
@@ -78,6 +105,31 @@ Streaming invokers yield `RunEvent` values:
 | `model.message` | Persisted model message metadata. |
 | `run.finished` | Final output or serialized error. |
 | `stream.overflow` | Stream buffer dropped old events. |
+
+`model.object.partial`, `model.object`,
+`model.embedding.completed`, and `model.rerank.completed` are provider-neutral
+runtime events when the configured provider path supports those operations.
+They remain harness events, not a Vercel stream protocol.
+
+## Model Provider Operations
+
+Provider packages implement the operations they support and declare matching
+alias capabilities:
+
+```ts
+interface ModelProvider {
+  text?(req: TextRequest): Promise<TextResponse>
+  textStream?(req: TextRequest): AsyncIterable<TextStreamChunk>
+  object?<T>(req: ObjectRequest<T>): Promise<ObjectResponse<T>>
+  objectStream?<T>(req: ObjectRequest<T>): AsyncIterable<ObjectStreamChunk<T>>
+  embed?(req: EmbeddingRequest): Promise<EmbeddingResponse>
+  rerank?(req: RerankRequest): Promise<RerankResponse>
+}
+```
+
+Use `object` and `object_stream` for structured outputs. Use `embeddings` and
+`rerank` for retrieval workflows; storage and retrieval policy stay outside
+core.
 
 ## Error Families
 

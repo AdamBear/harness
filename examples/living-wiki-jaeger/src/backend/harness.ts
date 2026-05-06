@@ -1,7 +1,7 @@
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { deflateRawSync } from 'node:zlib'
-import { bashSandbox, defineHarness, inMemorySandbox, JsonLogger, type Harness, type HarnessAdapterContext, type JsonRequest, type JsonResponse, type ModelProvider, type Sandbox, type ToolDefinition, type ToolsConfig } from '../../../../packages/harness/src/index.js'
+import { bashSandbox, defineHarness, inMemorySandbox, JsonLogger, type Harness, type HarnessAdapterContext, type JsonValue, type ObjectRequest, type ObjectResponse, type ModelProvider, type Sandbox, type ToolDefinition, type ToolsConfig } from '../../../../packages/harness/src/index.js'
 import { createFileWikiStore, type FileWikiStore } from './data.js'
 import { loadRootEnv as loadRepositoryRootEnv, requireOpenAiKey as requireRepositoryOpenAiKey } from './env.js'
 import { createLivingWikiTools, makePanelSpec } from './tools.js'
@@ -52,11 +52,11 @@ function requireOpenAiKey(): string {
 export class ScriptedLivingWikiProvider implements ModelProvider {
   public readonly id = 'scripted-living-wiki'
   public readonly genAiSystem = 'fake'
-  public readonly requests: JsonRequest[] = []
+  public readonly requests: ObjectRequest[] = []
 
   public constructor(private readonly options: { delayMs?: number } = {}) {}
 
-  async json(req: JsonRequest): Promise<JsonResponse> {
+  async object<T extends JsonValue = JsonValue>(req: ObjectRequest<T>): Promise<ObjectResponse<T>> {
     this.requests.push(req)
     if (this.options.delayMs) {
       await new Promise((resolve, reject) => {
@@ -71,7 +71,7 @@ export class ScriptedLivingWikiProvider implements ModelProvider {
     const text = JSON.stringify(req.messages).toLowerCase()
     const usage = { inputTokens: 20, outputTokens: 10, totalTokens: 30 }
     if (text.includes('ingest_source')) {
-      return { data: jsonData({
+      return { object: objectData({
         updatedPages: ['jaeger'],
         extractedConcepts: ['jaeger'],
         followUpQuestions: ['Which service owns trace retention?'],
@@ -79,27 +79,27 @@ export class ScriptedLivingWikiProvider implements ModelProvider {
         contradictions: [],
         citedEvidence: [sourceEvidence()],
         panelSpec: makePanelSpec('Source Ingest', [{ heading: 'Needs Review', items: ['1 proposed Jaeger page update'] }])
-      }), usage, finishReason: 'stop' }
+      }) as T, usage, finishReason: 'stop' }
     }
     if (text.includes('lint_wiki')) {
-      return { data: { orphanPages: [], missingBacklinks: [], weakClaims: [], staleNotes: [], duplicateConcepts: [], panelSpec: makePanelSpec('Lint Report', [{ heading: 'Status', items: ['No blocking wiki issues found.'] }]) } as JsonResponse['data'], usage, finishReason: 'stop' }
+      return { object: objectData({ orphanPages: [], missingBacklinks: [], weakClaims: [], staleNotes: [], duplicateConcepts: [], panelSpec: makePanelSpec('Lint Report', [{ heading: 'Status', items: ['No blocking wiki issues found.'] }]) }) as T, usage, finishReason: 'stop' }
     }
     if (text.includes('reconcile_contradiction')) {
-      return { data: { summary: 'The conflict is recorded and left with a narrow follow-up.', changedPages: ['jaeger'], unresolvedQuestions: ['Confirm the authoritative wording.'] }, usage, finishReason: 'stop' }
+      return { object: objectData({ summary: 'The conflict is recorded and left with a narrow follow-up.', changedPages: ['jaeger'], unresolvedQuestions: ['Confirm the authoritative wording.'] }) as T, usage, finishReason: 'stop' }
     }
     if (text.includes('generate_research_brief')) {
-      return { data: { markdown: '## Research Brief\n\nJaeger traces make local harness runs observable.', panelSpec: makePanelSpec('Research Brief', [{ heading: 'Cited Pages', items: ['jaeger'] }]), citedPages: ['jaeger'] } as JsonResponse['data'], usage, finishReason: 'stop' }
+      return { object: objectData({ markdown: '## Research Brief\n\nJaeger traces make local harness runs observable.', panelSpec: makePanelSpec('Research Brief', [{ heading: 'Cited Pages', items: ['jaeger'] }]), citedPages: ['jaeger'] }) as T, usage, finishReason: 'stop' }
     }
     if (text.includes('decision_memo')) {
-      return { data: jsonData(decisionMemoFixture()), usage, finishReason: 'stop' }
+      return { object: objectData(decisionMemoFixture()) as T, usage, finishReason: 'stop' }
     }
     if (text.includes('architecture_review')) {
-      return { data: jsonData(architectureReviewFixture()), usage, finishReason: 'stop' }
+      return { object: objectData(architectureReviewFixture()) as T, usage, finishReason: 'stop' }
     }
     if (text.includes('wiki_audit')) {
-      return { data: jsonData(wikiAuditFixture()), usage, finishReason: 'stop' }
+      return { object: objectData(wikiAuditFixture()) as T, usage, finishReason: 'stop' }
     }
-    return { data: { answer: 'Jaeger stores and visualizes traces for local harness workflow runs.', citedPages: ['jaeger'], confidenceNotes: ['Fake provider response for hermetic tests.'] }, usage, finishReason: 'stop' }
+    return { object: objectData({ answer: 'Jaeger stores and visualizes traces for local harness workflow runs.', citedPages: ['jaeger'], confidenceNotes: ['Fake provider response for hermetic tests.'] }) as T, usage, finishReason: 'stop' }
   }
 }
 
@@ -148,7 +148,7 @@ export function createLivingWikiHarness(options: LivingWikiHarnessOptions = {}):
       wiki_model: {
         provider,
         model,
-        capabilities: ['text', 'json', 'tool_use']
+        capabilities: ['text', 'object', 'tool_use']
       }
     })
     .tools(tools)
@@ -791,8 +791,8 @@ function drawioEditorUrl(xml: string): string {
   return `https://app.diagrams.net/?pv=0&grid=0#create=${createPayload}`
 }
 
-function jsonData(value: unknown): JsonResponse['data'] {
-  return JSON.parse(JSON.stringify(value)) as JsonResponse['data']
+function objectData<T extends JsonValue = JsonValue>(value: unknown): T {
+  return JSON.parse(JSON.stringify(value)) as T
 }
 
 function lazyOpenAiProvider(apiKey: string): ModelProvider {
@@ -829,16 +829,16 @@ function lazyOpenAiProvider(apiKey: string): ModelProvider {
         return provider.textStream(req)
       })
     },
-    async json(req) {
+    async object(req) {
       const provider = await load()
-      if (!provider.json) throw new Error('OpenAI provider does not implement JSON generation.')
-      return provider.json(req)
+      if (!provider.object) throw new Error('OpenAI provider does not implement object generation.')
+      return provider.object(req)
     },
-    jsonStream(req) {
+    objectStream(req) {
       return lazyStream(async () => {
         const provider = await load()
-        if (!provider.jsonStream) throw new Error('OpenAI provider does not implement JSON streaming.')
-        return provider.jsonStream(req)
+        if (!provider.objectStream) throw new Error('OpenAI provider does not implement object streaming.')
+        return provider.objectStream(req)
       })
     },
     async close() {

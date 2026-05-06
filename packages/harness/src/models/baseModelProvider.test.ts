@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { ModelError, OperationTimeoutError } from '../errors/index.js'
+import { ModelError, OperationTimeoutError, serializeError } from '../errors/index.js'
 import { JsonLogger, type Logger } from '../logger/index.js'
 import { BaseModelProvider } from '../ports/base-model-provider.js'
-import type { JsonRequest, JsonResponse } from '../ports/model-provider.js'
+import type { ObjectRequest, ObjectResponse } from '../ports/model-provider.js'
 import type { TelemetryShim } from '../telemetry/index.js'
 import type { HarnessAdapterContext } from '../ports/harness-context.js'
 
@@ -15,13 +15,13 @@ class TestProvider extends BaseModelProvider {
     super({ id: 'test', genAiSystem: 'test', ...opts })
   }
 
-  protected override async doJson(req: JsonRequest): Promise<JsonResponse> {
+  protected override async doObject<T extends import('./json.js').JsonValue = import('./json.js').JsonValue>(req: ObjectRequest<T>): Promise<ObjectResponse<T>> {
     if (this.delayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, this.delayMs))
     }
     if (this.error) throw this.error
     return {
-      data: { ok: true },
+      object: { ok: true } as unknown as T,
       usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
       finishReason: 'stop',
       raw: { secret: 'not logged' }
@@ -56,7 +56,7 @@ describe('BaseModelProvider', () => {
       headers: { 'x-request-id': 'req_base' }
     })
 
-    await expect(provider.json({
+    await expect(provider.object({
       model: 'm',
       messages: [],
       schema: {},
@@ -78,7 +78,7 @@ describe('BaseModelProvider', () => {
     const provider = new TestProvider({ timeoutMs: 5 })
     provider.delayMs = 50
 
-    await expect(provider.json({
+    await expect(provider.object({
       model: 'm',
       messages: [],
       schema: {},
@@ -96,7 +96,7 @@ describe('BaseModelProvider', () => {
     }
     const provider = new TestProvider({ telemetry })
 
-    await provider.json({ model: 'm', messages: [{ role: 'user', content: 'secret prompt' }], schema: {}, signal: new AbortController().signal })
+    await provider.object({ model: 'm', messages: [{ role: 'user', content: 'secret prompt' }], schema: {}, signal: new AbortController().signal })
 
     expect(calls.some((call) => call.name === 'harness.model.tokens.total')).toBe(true)
     expect(JSON.stringify(calls)).not.toContain('secret prompt')
@@ -119,7 +119,7 @@ describe('BaseModelProvider', () => {
       error: { message: 'Invalid messages', type: 'invalid_request_error', param: 'messages' }
     })
 
-    await expect(provider.json({
+    await expect(provider.object({
       model: 'm',
       messages: [],
       schema: {},
@@ -135,6 +135,52 @@ describe('BaseModelProvider', () => {
     })
   })
 
+  it('redacts sensitive provider error metadata in logs and serialization', async () => {
+    const logs: string[] = []
+    const provider = new TestProvider({
+      logger: new JsonLogger({ level: 'error', out: { write: (chunk) => logs.push(chunk) } })
+    })
+    provider.error = Object.assign(new Error('bad Bearer sk_live_secret'), {
+      status: 400,
+      code: 'invalid_request_error',
+      request_id: 'req_redact',
+      error: {
+        message: 'Invalid request Bearer sk_live_secret',
+        type: 'invalid_request_error',
+        apiKey: 'sk_live_secret',
+        messages: [{ role: 'user', content: 'private prompt' }]
+      },
+      headers: {
+        authorization: 'Bearer sk_live_secret',
+        'x-request-id': 'req_redact',
+        'x-api-key': 'sk_live_secret'
+      }
+    })
+
+    let caught: unknown
+    try {
+      await provider.object({
+        model: 'm',
+        messages: [],
+        schema: {},
+        signal: new AbortController().signal
+      })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(ModelError)
+    const serialized = JSON.stringify(serializeError(caught))
+    const logJson = logs.join('')
+    expect(serialized).toContain('req_redact')
+    expect(logJson).toContain('req_redact')
+    expect(serialized).not.toContain('sk_live_secret')
+    expect(logJson).not.toContain('sk_live_secret')
+    expect(serialized).not.toContain('private prompt')
+    expect(logJson).not.toContain('private prompt')
+    expect(serialized).not.toContain('authorization')
+  })
+
   it('inherits harness logger, telemetry, and timeout when adapter did not set them', async () => {
     const logs: string[] = []
     const counters: string[] = []
@@ -148,7 +194,7 @@ describe('BaseModelProvider', () => {
     provider.delayMs = 50
     provider.configureHarnessContext(harnessContext(new JsonLogger({ level: 'error', out: { write: (chunk) => logs.push(chunk) } }), telemetry, 5))
 
-    await expect(provider.json({
+    await expect(provider.object({
       model: 'm',
       messages: [],
       schema: {},
@@ -177,7 +223,7 @@ describe('BaseModelProvider', () => {
     const provider = new TestProvider({ telemetry: explicitTelemetry })
     provider.configureHarnessContext(harnessContext(new JsonLogger({ level: 'fatal', out: { write: () => undefined } }), inheritedTelemetry))
 
-    await provider.json({ model: 'm', messages: [], schema: {}, signal: new AbortController().signal })
+    await provider.object({ model: 'm', messages: [], schema: {}, signal: new AbortController().signal })
 
     expect(explicitCounters).toContain('harness.model.tokens.total')
     expect(inheritedCounters).toEqual([])

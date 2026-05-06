@@ -30,7 +30,7 @@ import { openai } from '@purista/harness-openai'
 
 export const harness = defineHarness()
   .models({
-    fast: { provider: openai({ apiKey: process.env.OPENAI_API_KEY! }), model: 'gpt-4o-mini', capabilities: ['text','json','tool_use'] },
+    fast: { provider: openai({ apiKey: process.env.OPENAI_API_KEY! }), model: 'gpt-4o-mini', capabilities: ['text','object','tool_use'] },
   })
   .tools({
     lookup_user: {

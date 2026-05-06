@@ -1,15 +1,20 @@
-import { ModelError, OperationCancelledError, OperationTimeoutError, HarnessError } from '../errors/index.js'
+import { ModelCapabilityError, ModelError, OperationCancelledError, OperationTimeoutError, HarnessError, sanitizeForLog, sanitizeProviderBody, sanitizeProviderMessage } from '../errors/index.js'
 import type { Span } from '@opentelemetry/api'
 import type { Logger } from '../logger/index.js'
 import type {
-  JsonRequest,
-  JsonResponse,
-  JsonStreamChunk,
+  EmbeddingRequest,
+  EmbeddingResponse,
   ModelProvider,
+  ObjectRequest,
+  ObjectResponse,
+  ObjectStreamChunk,
+  RerankRequest,
+  RerankResponse,
   TextRequest,
   TextResponse,
   TextStreamChunk
 } from './model-provider.js'
+import type { JsonValue } from '../models/json.js'
 import type { SpanAttrs, TelemetryShim } from '../telemetry/index.js'
 import type { HarnessAdapterContext } from './harness-context.js'
 
@@ -21,8 +26,8 @@ export interface BaseModelProviderOptions {
   timeoutMs?: number
 }
 
-type ProviderMethod = 'text' | 'textStream' | 'json' | 'jsonStream'
-type ProviderRequest = TextRequest | JsonRequest
+type ProviderMethod = 'text' | 'textStream' | 'object' | 'objectStream' | 'embed' | 'rerank'
+type ProviderRequest = TextRequest | ObjectRequest | EmbeddingRequest | RerankRequest
 
 /**
  * Base class for model adapters.
@@ -67,12 +72,20 @@ export abstract class BaseModelProvider implements ModelProvider {
     return this.stream('textStream', req, (next) => this.doTextStream(next as TextRequest))
   }
 
-  public json(req: JsonRequest): Promise<JsonResponse> {
-    return this.call('json', req, (next) => this.doJson(next as JsonRequest))
+  public object<T extends JsonValue = JsonValue>(req: ObjectRequest<T>): Promise<ObjectResponse<T>> {
+    return this.call('object', req, (next) => this.doObject(next as ObjectRequest<T>))
   }
 
-  public jsonStream(req: JsonRequest): AsyncIterable<JsonStreamChunk> {
-    return this.stream('jsonStream', req, (next) => this.doJsonStream(next as JsonRequest))
+  public objectStream<T extends JsonValue = JsonValue>(req: ObjectRequest<T>): AsyncIterable<ObjectStreamChunk<T>> {
+    return this.stream('objectStream', req, (next) => this.doObjectStream(next as ObjectRequest<T>))
+  }
+
+  public embed(req: EmbeddingRequest): Promise<EmbeddingResponse> {
+    return this.call('embed', req, (next) => this.doEmbed(next as EmbeddingRequest))
+  }
+
+  public rerank(req: RerankRequest): Promise<RerankResponse> {
+    return this.call('rerank', req, (next) => this.doRerank(next as RerankRequest))
   }
 
   protected doText(_req: TextRequest): Promise<TextResponse> {
@@ -83,12 +96,20 @@ export abstract class BaseModelProvider implements ModelProvider {
     throw this.methodMissing('textStream')
   }
 
-  protected doJson(_req: JsonRequest): Promise<JsonResponse> {
-    throw this.methodMissing('json')
+  protected doObject<T extends JsonValue = JsonValue>(_req: ObjectRequest<T>): Promise<ObjectResponse<T>> {
+    throw this.methodMissing('object')
   }
 
-  protected doJsonStream(_req: JsonRequest): AsyncIterable<JsonStreamChunk> {
-    throw this.methodMissing('jsonStream')
+  protected doObjectStream<T extends JsonValue = JsonValue>(_req: ObjectRequest<T>): AsyncIterable<ObjectStreamChunk<T>> {
+    throw this.methodMissing('objectStream')
+  }
+
+  protected doEmbed(_req: EmbeddingRequest): Promise<EmbeddingResponse> {
+    throw this.methodMissing('embed')
+  }
+
+  protected doRerank(_req: RerankRequest): Promise<RerankResponse> {
+    throw this.methodMissing('rerank')
   }
 
   protected normalizeError(error: unknown, method: ProviderMethod, req: ProviderRequest): HarnessError {
@@ -126,7 +147,7 @@ export abstract class BaseModelProvider implements ModelProvider {
       try {
         const operation = fn(next.req)
         const result = await (next.timeoutPromise ? Promise.race([operation, next.timeoutPromise]) : operation)
-        this.telemetry?.recordHistogram('harness.model.duration', Date.now() - started, attrs)
+        this.telemetry?.recordHistogram('harness.model.duration', (Date.now() - started) / 1000, attrs)
         this.recordUsage(method, req.model, result)
         return result
       } catch (error) {
@@ -137,7 +158,7 @@ export abstract class BaseModelProvider implements ModelProvider {
           provider: this.id,
           model: req.model,
           method,
-          error: { code: normalized.code, category: normalized.category, retriable: normalized.retriable, meta: normalized.meta }
+          error: sanitizeForLog({ code: normalized.code, category: normalized.category, retriable: normalized.retriable, meta: normalized.meta })
         })
         throw normalized
       } finally {
@@ -147,30 +168,36 @@ export abstract class BaseModelProvider implements ModelProvider {
     return this.telemetry ? this.telemetry.span(`harness.model.${method}`, attrs, execute) : execute()
   }
 
-  private async *stream<T>(method: ProviderMethod, req: ProviderRequest, fn: (req: ProviderRequest) => AsyncIterable<T>): AsyncIterable<T> {
+  private stream<T>(method: ProviderMethod, req: ProviderRequest, fn: (req: ProviderRequest) => AsyncIterable<T>): AsyncIterable<T> {
     req.signal.throwIfAborted()
     const attrs = this.attrs(method, req)
     const started = Date.now()
-    const next = this.withTimeout(req, method)
-    try {
-      for await (const chunk of fn(next.req)) {
-        next.req.signal.throwIfAborted()
-        yield chunk
+    const iterate = async function* (this: BaseModelProvider, span?: Span): AsyncIterable<T> {
+      const next = this.withTimeout(req, method)
+      try {
+        for await (const chunk of fn(next.req)) {
+          next.req.signal.throwIfAborted()
+          yield chunk
+        }
+        this.telemetry?.recordHistogram('harness.model.duration', (Date.now() - started) / 1000, attrs)
+      } catch (error) {
+        const normalized = this.normalizeError(error, method, next.req)
+        span?.setAttributes?.(modelErrorTelemetryAttrs(normalized))
+        this.telemetry?.recordCounter('harness.model.errors', 1, { ...attrs, 'error.code': normalized.code })
+        this.logger?.error('Model provider stream failed.', {
+          provider: this.id,
+          model: req.model,
+          method,
+          error: sanitizeForLog({ code: normalized.code, category: normalized.category, retriable: normalized.retriable, meta: normalized.meta })
+        })
+        throw normalized
+      } finally {
+        next.cleanup()
       }
-      this.telemetry?.recordHistogram('harness.model.duration', Date.now() - started, attrs)
-    } catch (error) {
-      const normalized = this.normalizeError(error, method, next.req)
-      this.telemetry?.recordCounter('harness.model.errors', 1, { ...attrs, 'error.code': normalized.code })
-      this.logger?.error('Model provider stream failed.', {
-        provider: this.id,
-        model: req.model,
-        method,
-        error: { code: normalized.code, category: normalized.category, retriable: normalized.retriable, meta: normalized.meta }
-      })
-      throw normalized
-    } finally {
-      next.cleanup()
-    }
+    }.bind(this)
+
+    if (!this.telemetry) return iterate()
+    return streamWithSpan(this.telemetry, `harness.model.${method}`, attrs, iterate)
   }
 
   private withTimeout<T extends ProviderRequest>(req: T, method: ProviderMethod): { req: T; timeoutPromise?: Promise<never>; cleanup: () => void } {
@@ -199,12 +226,11 @@ export abstract class BaseModelProvider implements ModelProvider {
     }
   }
 
-  private methodMissing(method: ProviderMethod): ModelError {
-    return new ModelError('Model provider method is not implemented.', {
-      provider: this.id,
-      model: 'unknown',
+  private methodMissing(method: ProviderMethod): ModelCapabilityError {
+    return new ModelCapabilityError('Model provider method is not implemented.', {
+      alias: this.id,
       method,
-      reason: 'malformed_response'
+      reason: 'method_missing'
     })
   }
 
@@ -225,6 +251,47 @@ export abstract class BaseModelProvider implements ModelProvider {
     this.telemetry?.recordCounter('harness.model.tokens.output', usage.outputTokens, attrs)
     this.telemetry?.recordCounter('harness.model.tokens.total', usage.totalTokens, attrs)
   }
+}
+
+async function* streamWithSpan<T>(
+  telemetry: TelemetryShim,
+  name: string,
+  attrs: SpanAttrs,
+  iterate: (span?: Span) => AsyncIterable<T>
+): AsyncIterable<T> {
+  const queue: T[] = []
+  let done = false
+  let failure: unknown
+  let notify: (() => void) | undefined
+  const wake = () => {
+    notify?.()
+    notify = undefined
+  }
+
+  const producer = telemetry.span(name, attrs, async (span) => {
+    for await (const chunk of iterate(span)) {
+      queue.push(chunk)
+      wake()
+    }
+  }).catch((error) => {
+    failure = error
+  }).finally(() => {
+    done = true
+    wake()
+  })
+
+  while (!done || queue.length > 0) {
+    const next = queue.shift()
+    if (next !== undefined) {
+      yield next
+      continue
+    }
+    if (failure) throw failure
+    await new Promise<void>((resolve) => { notify = resolve })
+  }
+
+  await producer
+  if (failure) throw failure
 }
 
 function isAbortError(error: unknown): boolean {
@@ -307,7 +374,8 @@ function extractProviderErrorDetails(error: unknown): {
     ?? stringField(record, 'requestID')
     ?? headers?.['x-request-id']
     ?? headers?.['request-id']
-  const providerMessage = stringField(errorBody, 'message') ?? stringField(record, 'message')
+  const providerMessageRaw = stringField(errorBody, 'message') ?? stringField(record, 'message')
+  const providerMessage = providerMessageRaw ? sanitizeProviderMessage(providerMessageRaw) : undefined
 
   return {
     ...(status !== undefined ? { status } : {}),
@@ -316,8 +384,7 @@ function extractProviderErrorDetails(error: unknown): {
     ...(providerParam ? { providerParam } : {}),
     ...(providerRequestId ? { providerRequestId } : {}),
     ...(providerMessage ? { providerMessage } : {}),
-    ...(providerBody !== undefined ? { providerBody } : {}),
-    ...(headers ? { providerHeaders: headers } : {})
+    ...(providerBody !== undefined ? { providerBody } : {})
   }
 }
 
@@ -347,17 +414,6 @@ function normalizeHeaders(value: unknown): Record<string, string> | undefined {
   return Object.keys(headers).length > 0 ? headers : undefined
 }
 
-function sanitizeJsonLike(value: unknown, depth = 0): unknown {
-  if (value === undefined) return undefined
-  if (value === null || typeof value === 'number' || typeof value === 'boolean') return value
-  if (typeof value === 'string') return value.slice(0, 4000)
-  if (depth >= 4) return '[truncated]'
-  if (Array.isArray(value)) return value.slice(0, 20).map((item) => sanitizeJsonLike(item, depth + 1))
-  const record = asRecord(value)
-  if (!record) return String(value).slice(0, 4000)
-  const out: Record<string, unknown> = {}
-  for (const [key, item] of Object.entries(record).slice(0, 40)) {
-    out[key] = sanitizeJsonLike(item, depth + 1)
-  }
-  return out
+function sanitizeJsonLike(value: unknown): unknown {
+  return sanitizeProviderBody(value)
 }

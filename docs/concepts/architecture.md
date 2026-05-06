@@ -108,8 +108,8 @@ sequenceDiagram
   Session->>State: create run
   Session-->>App: run.started
   Session->>Agent: invoke
-  Agent->>Model: JSON request with tool specs
-  Model-->>Agent: tool call or final JSON
+  Agent->>Model: object request with tool specs
+  Model-->>Agent: tool call or final object
   opt tool call
     Agent-->>App: tool.started
     Agent->>Tool: execute with timeout and sandbox

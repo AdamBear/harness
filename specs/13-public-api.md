@@ -45,12 +45,12 @@ export class JsonLogger implements Logger {
 export class InMemoryStateStore implements StateStore { constructor() }
 
 // Sandbox factories (default adapters)
-export function inMemorySandbox(): Sandbox                     // files-only; executor: 'unavailable'
+export function inMemorySandbox(): Sandbox<readonly ['sandbox.fs']>
 export function bashSandbox(opts?: {
   network?: { allow?: string[]; deny?: string[] }
   executionLimits?: { wallClockMs?: number; memoryMb?: number }
   python?: boolean
-}): Sandbox                                                    // wraps just-bash peer dep; executor: 'available'
+}): Sandbox<readonly ['sandbox.fs', 'sandbox.exec']>
 
 // Errors (every class from 15-error-catalog)
 export class HarnessError extends Error { /* see 03-foundation */ }
@@ -147,6 +147,11 @@ export interface BaseModelProviderOptions
 export interface HarnessAdapterContext
 export interface HarnessContextConfigurable
 export type ModelCapability
+export type ModelHandles
+export interface ModelProviderInfo
+export interface ModelFeatureSet
+export type ContentPartKind
+export type OutputMode
 export interface BaseRequest
 export interface ModelCallOptions
 export type ModelMessage
@@ -156,9 +161,16 @@ export interface ModelToolSpec
 export interface TextRequest
 export interface TextResponse
 export type TextStreamChunk
-export interface JsonRequest
-export interface JsonResponse
-export type JsonStreamChunk
+export interface ObjectRequest
+export interface ObjectResponse
+export type ObjectStreamChunk
+export interface EmbeddingRequest
+export interface EmbeddingResponse
+export interface Embedding
+export interface RerankRequest
+export interface RerankResponse
+export interface RerankDocument
+export interface RerankResult
 export interface TokenUsage
 export type FinishReason
 
@@ -172,8 +184,21 @@ export interface TelemetryOptions
 export interface StateStore
 export abstract class StateStoreAdapterBase
 export type FinishRunPatch
+export type AdapterCapability
+export interface AdapterCapabilities
+export interface DurableRuntimeAdapter
+export interface AdapterInspection
+export interface HarnessInspection
 export interface Sandbox
+export interface SandboxSessionBase
+export interface ExecCapableSandboxSession
 export interface SandboxSession
+export type SandboxSessionFor
+export interface SnapshotResult
+export interface SandboxResumeOptions
+export interface SnapshotCapableSandbox
+export interface ResumeCapableSandbox
+export interface HibernateCapableSandbox
 export interface ExecOptions
 export interface ExecResult
 export interface DirEntry
@@ -209,6 +234,8 @@ interface HarnessBuilder<S extends BuilderState> {
   logger(logger: Logger): HarnessBuilder<S>
   state(store: StateStore): HarnessBuilder<S>
   sandbox(sandbox: Sandbox): HarnessBuilder<S>
+  runtime(runtime: DurableRuntimeAdapter): HarnessBuilder<S>
+  requires(required: readonly AdapterCapability[]): HarnessBuilder<S>
   defaults(d: HarnessDefaults): HarnessBuilder<S>
 
   // Domain — each must be called exactly once before .build(), in this order:
@@ -233,6 +260,7 @@ The builder type omits already-set or out-of-order methods so that incorrect cha
 ```ts
 interface Harness<S extends BuilderState> {
   getSession(id: string): Promise<Session<S>>
+  inspect(): HarnessInspection
   shutdown(): Promise<{ errors: HarnessError[] }>
   /** Phantom value (literal `{}` at harness). Compile-time-only inference handle. */
   readonly $infer: InferTypes<S>
@@ -295,6 +323,18 @@ type AgentInput   = typeof harness.$infer.agents.wiki_answerer.input
 ```
 
 This mirrors the Drizzle/tRPC `$inferSelect`/`AppRouter` pattern.
+
+### Capability-projected model handles
+
+Model capabilities are policy. `ctx.models`, direct registry handles, and any
+public model-handle helper expose only methods allowed by the alias's declared
+`capabilities` array. For example, an alias declared with
+`capabilities: ['text']` exposes `text(...)` but not `embed(...)`, while an alias
+declared with `capabilities: ['text', 'embeddings']` exposes both. Marker
+capabilities also narrow request shapes: `tool_use` gates `tools` and tool-role
+messages, `vision_input` gates image parts, `audio_input` gates audio parts, and
+`file_input` gates file parts. Runtime `ModelCapabilityError` checks remain
+required for JavaScript callers and widened configuration.
 
 ### `TelemetryOptions`
 
@@ -399,7 +439,7 @@ export interface OpenAiFactoryOptions extends ClientOptions {
 export function openai(opts?: OpenAiFactoryOptions): ModelProvider
 ```
 
-`openai(...)` returns a fully-typed `ModelProvider` implementing `text`, `textStream`, `json`, `jsonStream`. It is intentionally a thin adapter over the official `openai` SDK: SDK client options are accepted directly, and per-call `providerOptions` are passed through to `chat.completions.create(...)` with `providerOptions.requestOptions` forwarded as the SDK request-options object. Harness logger, telemetry, and model timeout defaults are inherited automatically when the provider is registered; adapter options only override those inherited values. The provider sets `gen_ai.system = 'openai'` on every model-call span (see [14-otel-conventions](./14-otel-conventions.md)). Capability claims at the alias level are the user's responsibility.
+`openai(...)` returns a fully-typed `ModelProvider` implementing `text`, `textStream`, `object`, `objectStream`, and `embed` when the selected official OpenAI SDK operations support them. Reranking is implemented only if the current official OpenAI SDK exposes a suitable operation; otherwise the provider omits the `rerank` capability and fake-provider contract tests cover the core behavior. The adapter is intentionally thin over the official `openai` SDK: SDK client options are accepted directly, and per-call `providerOptions` are passed through to the matching SDK call with `providerOptions.requestOptions` forwarded as the SDK request-options object. Harness logger, telemetry, and model timeout defaults are inherited automatically when the provider is registered; adapter options only override those inherited values. The provider sets `gen_ai.system = 'openai'` on every model-call span (see [14-otel-conventions](./14-otel-conventions.md)). Capability claims at the alias level are the user's responsibility.
 
 ### Exports — types
 
