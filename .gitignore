@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-test/
+coverage/
+.vitest/
+.vite/
+*.tsbuildinfo
+.DS_Store
+*.log
+.env
+examples/living-wiki-jaeger/data/artifacts

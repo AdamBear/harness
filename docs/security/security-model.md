@@ -1,0 +1,72 @@
+# Security Model
+
+The harness is designed for self-hosted systems where the application team owns
+deployment, adapters, data retention, and authorization.
+
+## Trust Boundaries
+
+```mermaid
+flowchart LR
+  User["User / caller"] --> App["Application authz boundary"]
+  App --> Harness["Harness runtime"]
+  Harness --> Provider["External model provider"]
+  Harness --> Sandbox["Sandbox"]
+  Harness --> State["State store"]
+  Harness --> Tools["Tools and MCP servers"]
+```
+
+| Boundary | Treat As | Required Control |
+|---|---|---|
+| User input | Untrusted | Validate with schemas and application authz. |
+| Model output | Untrusted | Validate output schemas before use. |
+| Tool input from model | Untrusted | Validate tool schemas and permission gates. |
+| External providers | External dependency | Timeouts, error mapping, secret handling. |
+| Sandbox execution | Privileged | Least privilege, explicit executor choice. |
+| State/history | Sensitive data | Retention, tenant scoping, access control. |
+
+## Secrets
+
+- Use environment variables or secret managers.
+- Do not put secrets in skill files, wiki pages, prompts, test fixtures, or logs.
+- Do not enable telemetry content capture in shared environments.
+- Redact MCP payloads and provider request bodies by default.
+
+## Sandbox And Tool Risk
+
+Built-in `bash`, `write`, and `edit` can mutate state or execute commands.
+
+Recommended defaults:
+
+- disable built-ins with `builtinTools: false` unless needed;
+- allow only explicit custom tools;
+- use `inMemorySandbox()` for file-only use cases;
+- use executor-capable sandbox only for trusted workloads that require command
+  execution or `mcp_stdio`;
+- add permission hooks for mutating tools.
+
+## MCP Security
+
+| Mode | Main Risk | Mitigation |
+|---|---|---|
+| `mcp_stdio` | Local command execution. | Run through sandbox executor; use idempotent install; restrict env; set timeouts. |
+| `mcp_http` | Remote service and auth exposure. | Use HTTPS, scoped tokens, auth failure handling, and payload redaction. |
+
+## Telemetry Privacy
+
+Default behavior is privacy-safe:
+
+- persisted event payload content is redacted unless content capture is enabled;
+- spans should include IDs and error metadata, not full prompts or file content;
+- provider and MCP error metadata should be actionable without leaking secrets.
+
+Only enable `telemetry.captureContent` for local diagnostics with approved data.
+
+## Review Gates
+
+Human-in-the-loop flows should enforce:
+
+- no mutation before approval;
+- typed review decisions;
+- idempotent decision submission;
+- stale review/run rejection;
+- audit log entry for applied, rejected, or revision decisions.

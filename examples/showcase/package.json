@@ -1,0 +1,22 @@
+{
+  "name": "@purista/showcase",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run src",
+    "start": "node dist/examples/showcase/src/index.js",
+    "lint": "echo 'no lint configured for @purista/showcase'"
+  },
+  "dependencies": {
+    "@purista/harness": "*",
+    "@purista/harness-openai": "*",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  }
+}

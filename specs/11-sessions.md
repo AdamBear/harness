@@ -1,0 +1,171 @@
+# Sessions
+
+**Purpose.** Defines the `Session` API, persistence semantics, the serial-execution concurrency rule, message shape (referenced from [04](./04-state-queue-stream.md)), and session memory semantics (backed by the sandbox `/memory/` directory).
+
+## API
+
+```ts
+interface Harness<S> {
+  getSession(id: string): Promise<Session<S>>
+}
+
+interface Session<S> {
+  readonly id: string
+  readonly agents: { readonly [K in keyof S['agents']]: AgentInvoker<S, K> }
+  readonly workflows: { readonly [K in keyof S['workflows']]: WorkflowInvoker<S, K> }
+  memory: SessionMemory
+  history: ConversationHistory
+  /** Remove all messages for this session. See "Conversation history and threads". */
+  clearHistory(): Promise<void>
+  /** Atomically replace history with the provided messages. Each entry gets a fresh ULID and current timestamp. */
+  replaceHistory(messages: ReadonlyArray<Omit<Message, 'id' | 'timestamp'>>): Promise<void>
+  close(): Promise<void>
+}
+
+interface AgentInvoker<S, K extends keyof S['agents']> {
+  prompt(input: AgentInput<S, K>, opts?: InvokeOptions): Promise<AgentOutput<S, K>>
+  stream(input: AgentInput<S, K>, opts?: InvokeOptions): AsyncIterable<RunEvent>
+}
+
+interface WorkflowInvoker<S, K extends keyof S['workflows']> {
+  prompt(input: WorkflowInput<S, K>, opts?: InvokeOptions): Promise<WorkflowOutput<S, K>>
+  stream(input: WorkflowInput<S, K>, opts?: InvokeOptions): AsyncIterable<RunEvent>
+}
+
+interface InvokeOptions {
+  signal?: AbortSignal
+  /** Override the default run timeout for this call. `>0` enabled, `0` disabled, `<0` throws `ValidationError`. */
+  timeoutMs?: number
+  /** Override `harness.defaults.historyWindow` for this call. Same semantics; negative throws `ValidationError{where:'invoke_options'}`. */
+  historyWindow?: number
+}
+```
+
+`Session` is a JS object with:
+
+- A fixed `id` property.
+- An `agents` map: one `AgentInvoker` per registered agent id.
+- A `workflows` map: one `WorkflowInvoker` per registered workflow id.
+- `memory` and `history` handles for direct out-of-run access.
+- A `close()` method.
+
+There is no dynamic `session.<workflowId>` property lookup and no `session.agent(...)` method. Direct one-agent execution is available through `session.agents.<agentId>.prompt(...)` and `.stream(...)`. Multi-agent execution is reachable only through workflows.
+
+Application-facing execution is session-centric. The harness owns registries, adapters, and factories, but application code performs work through `harness.getSession(id)` followed by `session.agents.<agentId>.prompt(...)` / `.stream(...)` for direct agent work or `session.workflows.<workflowId>.prompt(...)` / `.stream(...)` for orchestration.
+
+## Lifecycle
+
+- `harness.getSession(id)`:
+  1. Looks up `state.getSession(id)`.
+  2. If absent, calls `state.upsertSession({id, createdAt: now, updatedAt: now, runCount: 0})`.
+  3. Returns a `Session` instance bound to that id.
+- `Session` instances are not cached by the harness — each call returns a fresh facade. They are cheap to construct.
+
+## Per-call lifecycle (locked order)
+
+For every `session.agents[id].prompt(input, opts?)`, `session.agents[id].stream(input, opts?)`, `session.workflows[id].prompt(input, opts?)`, and `session.workflows[id].stream(input, opts?)`:
+
+1. **Synchronous pre-checks.** Assert `opts.signal` is not aborted (if aborted, reject in a microtask with `OperationCancelledError{scope:'run'}`). Assert no other run is in-flight on this session (else throw `SessionBusyError` synchronously).
+2. **Acquire session lock.**
+3. **Open `harness.session.prompt` span** (outermost) with attributes `harness.session.id`, `harness.run.id`, and `harness.workflow.id` for workflow runs.
+4. **Validate input** via the selected agent/workflow input schema. Failure → `ValidationError{where:'agent_input'|'workflow_input'}`.
+5. **`state.createRun({status:'running', ...})`.** If this fails, the harness does not open further spans, does not emit any RunEvent, and propagates the `StateError` to the caller of `prompt`/`stream`.
+6. **Emit `run.started`** to the in-process run queue (see [12-streaming](./12-streaming.md)) and persist via `state.appendEvents`.
+7. **Open child span**: `harness.agent.run` for direct agent runs or `harness.workflow.run` for workflow runs.
+8. **On success:** validate output via the selected output schema (failure → `ValidationError{where:'agent_output'|'workflow_output'}`); emit `run.finished{output}`; `state.finishRun({status:'succeeded', finishedAt, output})`.
+9. **On error:** classify the error; emit `run.finished{error}`; `state.finishRun({status:'failed'|'cancelled', finishedAt, error})`. (`cancelled` is used when the cause is `OperationCancelledError`; `failed` otherwise — including `OperationTimeoutError`.)
+10. **Close spans, release lock.**
+11. **Resolve `prompt` with output (or reject with error).** For `stream`, the async iterator yields events as they are emitted and finishes after `run.finished` is yielded.
+
+The outermost span is always `harness.session.prompt`; the child is `harness.agent.run` for direct agent runs or `harness.workflow.run` for workflow runs.
+
+## Concurrency rule (locked)
+
+Sessions are **serial-only**. Per session, only one run executes at a time. Implementation:
+
+- The harness maintains an in-process per-session async lock keyed by `sessionId`.
+- Each `prompt`/`stream` call acquires the lock at start.
+- Sessions execute one prompt/stream at a time. Overlap throws `SessionBusyError` synchronously (`category:'session'`, `retriable:true`).
+- There is no `concurrent: true` opt-out.
+
+Cross-process concurrency is enforced only in-process. Cross-process callers may execute concurrently unless the StateStore adapter implements advisory locks (out-of-scope for v1).
+
+## Persistence semantics
+
+For every run:
+
+1. A `RunRecord` is created via `state.createRun({id, sessionId, kind:'agent'|'workflow', target:agentIdOrWorkflowId, startedAt, status:'running', input})`.
+2. As the run executes, the harness appends messages to `state.appendMessages(sessionId, ...)` whenever the conversation list grows.
+3. RunEvents are appended to the in-process run queue (consumed by any active `stream()` iterator) AND persisted via `state.appendEvents(runId, ...)`. `appendEvents` failures are logged at `error` level and counted via the `harness.events.persist_errors` metric; the run continues unaffected.
+4. On finish: `state.finishRun(runId, {status, finishedAt, output?, error?})`. Session metadata is updated with `updatedAt` and incremented `runCount`.
+
+Append rules:
+
+- `system` messages are persisted once per agent run (rebuilt from instructions each time and appended).
+- `user`, `assistant`, `tool` messages are persisted as they're produced.
+
+## Session memory
+
+Session memory is collapsed into a `/memory/` directory inside the sandbox. There is no typed KV in the StateStore. App-side typed access is provided via `Session.memory` (`SessionMemory`); the model can also read/write `/memory/` directly via the built-in `read`/`write` tools.
+
+```ts
+interface SessionMemory {
+  read(key: string): Promise<JsonValue | undefined>           // reads /memory/<key>.json
+  write(key: string, value: JsonValue): Promise<void>          // writes /memory/<key>.json (creates dir if missing)
+  delete(key: string): Promise<void>
+  list(): Promise<string[]>                                    // returns keys, derived from /memory/*.json filenames
+}
+```
+
+Locked semantics:
+
+- `key` regex `/^[A-Za-z0-9_.\-:]+$/`, ≤256 chars. Invalid → `ValidationError{where:'memory_key'}`.
+- `value` is JSON-serialized via `JSON.stringify`. Non-serializable values (functions, symbols, BigInt, circular refs) throw `ValidationError{where:'memory_value'}`.
+- Reads and writes are atomic per key (single file write).
+- Memory persists for the lifetime of the sandbox session. The default in-memory sandbox loses everything on process exit; future persistent sandbox adapters may persist `/memory/` to disk.
+
+## Conversation history and threads
+
+**One session equals one conversation thread.** The harness does not model thread/conversation as a separate entity in v1. Apps that need multiple chat threads per user MUST create multiple sessions, e.g. `session_id = \`${userId}:${threadId}\``. Each session owns its own message history, sandbox session (with `/memory/`), and serial-execution lock.
+
+### History window
+
+`HarnessDefaults.historyWindow` (see [02-harness-config](./02-harness-config.md)) caps how many conversation messages are passed into model calls. `InvokeOptions.historyWindow` overrides it for a single call. Locked semantics:
+
+- `undefined` ⇒ pass all messages.
+- `0` ⇒ pass system messages only (no prior turns).
+- positive integer `N` ⇒ pass at most `N` messages, computed as: every `role:'system'` message is always included; remaining slots are filled with the most recent non-system messages preserving chronological order.
+- negative ⇒ rejected: at config time as `HarnessConfigError`; at call time (`InvokeOptions.historyWindow`) as `ValidationError{where:'invoke_options'}`.
+
+The cap is applied by the default agent loop before history conversion (see [09-agents](./09-agents.md) §"History conversion"). Custom-handler agents that consume `ctx.history` directly are responsible for honoring the window themselves.
+
+### `Session.clearHistory()`
+
+```ts
+clearHistory(): Promise<void>
+```
+
+Removes all messages from the StateStore for this session id. Memory KV is unaffected. Emits no `RunEvent` (it is not part of a run). Acquires the per-session serial lock; if a run is in flight, rejects with `SessionBusyError{meta.reason:'history_clear_during_run'}`.
+
+### `Session.replaceHistory(messages)`
+
+```ts
+replaceHistory(messages: ReadonlyArray<Omit<Message, 'id' | 'timestamp'>>): Promise<void>
+```
+
+Atomically replaces history (delete-then-bulk-append). Each message gets a fresh ULID and the current ISO 8601 UTC timestamp. Validates each entry against the `Message` Zod schema; failure throws `ValidationError{where:'session_history'}`. Acquires the per-session serial lock; if a run is in flight, rejects with `SessionBusyError{meta.reason:'history_replace_during_run'}`.
+
+### Provider context-length errors
+
+When a model call fails because the prompt exceeds the model's context length, the provider implementation maps the response to `ModelError{meta.reason:'context_length_exceeded'}` (see [06-models](./06-models.md), [15-error-catalog](./15-error-catalog.md)). Callers can recover by reducing `historyWindow`, calling `replaceHistory` to summarize, or calling `clearHistory` to start fresh.
+
+## Replay
+
+Out of scope for v1. The persisted `RunRecord` + `PersistedRunEvent` log is sufficient to reconstruct the run history offline; no API is provided.
+
+## Cross-references
+
+- [04-state-queue-stream](./04-state-queue-stream.md) — persisted shapes.
+- [09-agents](./09-agents.md), [10-workflows](./10-workflows.md) — invocation paths.
+- [12-streaming](./12-streaming.md) — `RunEvent` and stream relay.
+- [15-error-catalog](./15-error-catalog.md) — `SessionBusyError`, `SessionNotFoundError`.
