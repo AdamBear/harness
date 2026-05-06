@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": [
+    "src/models/globals.d.ts",
+    "src/errors/**/*.ts",
+    "src/logger/**/*.ts",
+    "src/telemetry/**/*.ts",
+    "src/ulid/**/*.ts",
+    "src/ports/**/*.ts",
+    "src/models/**/*.ts",
+    "src/testing/stateStoreContract.ts",
+    "src/index.ts",
+    "type-tests/**/*.ts"
+  ]
+}

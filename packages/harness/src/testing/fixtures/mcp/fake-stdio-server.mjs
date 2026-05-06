@@ -1,0 +1,36 @@
+#!/usr/bin/env node
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import * as z from 'zod/v4'
+
+const server = new McpServer({ name: 'purista-fake-stdio-mcp', version: '0.0.0' })
+
+server.registerTool('echo', {
+  description: 'Echoes a message as structured content.',
+  inputSchema: {
+    message: z.string(),
+    delayMs: z.number().optional(),
+    die: z.boolean().optional()
+  },
+  outputSchema: {
+    echo: z.string()
+  }
+}, async ({ message, delayMs, die }) => {
+  if (die) process.exit(9)
+  if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs))
+  const structuredContent = { echo: message }
+  return {
+    content: [{ type: 'text', text: JSON.stringify(structuredContent) }],
+    structuredContent
+  }
+})
+
+server.registerTool('bad-envelope', {
+  description: 'Returns an MCP error envelope.',
+  inputSchema: { message: z.string() }
+}, async () => ({
+  isError: true,
+  content: [{ type: 'text', text: 'fake MCP failure' }]
+}))
+
+await server.connect(new StdioServerTransport())

@@ -1,0 +1,251 @@
+import { describe, expect, it } from 'vitest'
+import { openai } from '../src/index.js'
+
+function mockSignal(): AbortSignal {
+  return new AbortController().signal
+}
+
+describe('openai provider factory', () => {
+  it('returns provider metadata and maps text response', async () => {
+    const provider = openai({
+      client: {
+        chat: {
+          completions: {
+            create: async () => ({
+              choices: [
+                {
+                  message: { content: 'hello' },
+                  finish_reason: 'stop'
+                }
+              ],
+              usage: { prompt_tokens: 4, completion_tokens: 2 }
+            })
+          }
+        }
+      } as any
+    })
+
+    expect(provider.id).toBe('openai')
+    expect(provider.genAiSystem).toBe('openai')
+
+    const response = await provider.text!({
+      model: 'gpt-4.1-mini',
+      messages: [{ role: 'user', content: 'hi' }],
+      signal: mockSignal()
+    })
+
+    expect(response.content).toBe('hello')
+    expect(response.usage.totalTokens).toBe(6)
+    expect(response.finishReason).toBe('stop')
+  })
+
+  it('maps context_length_exceeded reason on failure', async () => {
+    const provider = openai({
+      client: {
+        chat: {
+          completions: {
+            create: async () => {
+              const error = new Error('too long') as Error & { code?: string; meta?: Record<string, unknown> }
+              error.code = 'context_length_exceeded'
+              throw error
+            }
+          }
+        }
+      } as any
+    })
+
+    await expect(
+      provider.text!({
+        model: 'gpt-4.1-mini',
+        messages: [{ role: 'user', content: 'hi' }],
+        signal: mockSignal()
+      })
+    ).rejects.toMatchObject({
+      meta: { reason: 'context_length_exceeded' }
+    })
+  })
+
+  it('preserves OpenAI HTTP error details on failure', async () => {
+    const provider = openai({
+      client: {
+        chat: {
+          completions: {
+            create: async () => {
+              const error = Object.assign(new Error('400 Invalid messages'), {
+                status: 400,
+                code: 'invalid_request_error',
+                type: 'invalid_request_error',
+                param: 'messages',
+                request_id: 'req_123',
+                error: { message: 'Invalid messages', type: 'invalid_request_error', param: 'messages' },
+                headers: { 'x-request-id': 'req_123' }
+              })
+              throw error
+            }
+          }
+        }
+      } as any
+    })
+
+    await expect(
+      provider.text!({
+        model: 'gpt-4.1-mini',
+        messages: [{ role: 'user', content: 'hi' }],
+        signal: mockSignal()
+      })
+    ).rejects.toMatchObject({
+      meta: {
+        status: 400,
+        reason: 'http_error',
+        providerCode: 'invalid_request_error',
+        providerType: 'invalid_request_error',
+        providerParam: 'messages',
+        providerRequestId: 'req_123',
+        providerMessage: 'Invalid messages',
+        providerBody: { message: 'Invalid messages', type: 'invalid_request_error', param: 'messages' }
+      }
+    })
+  })
+
+  it('maps json response from text content', async () => {
+    const calls: any[] = []
+    const provider = openai({
+      client: {
+        chat: {
+          completions: {
+            create: async (payload: any) => {
+              calls.push(payload)
+              return {
+              choices: [
+                {
+                  message: { content: '{"ok":true}' },
+                  finish_reason: 'stop'
+                }
+              ],
+              usage: { prompt_tokens: 3, completion_tokens: 2 }
+              }
+            }
+          }
+        }
+      } as any
+    })
+
+    const schema = { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' } } }
+    const response = await provider.json!({
+      model: 'gpt-4.1-mini',
+      messages: [{ role: 'user', content: 'json please' }],
+      schema,
+      signal: mockSignal()
+    })
+
+    expect(response.data).toEqual({ ok: true })
+    expect(response.usage.totalTokens).toBe(5)
+    expect(calls[0]?.response_format).toEqual({
+      type: 'json_schema',
+      json_schema: {
+        name: 'harness_response',
+        strict: false,
+        schema
+      }
+    })
+  })
+
+  it('passes provider options through to the official SDK payload and request options', async () => {
+    const calls: Array<{ payload: any; options: any }> = []
+    const provider = openai({
+      client: {
+        chat: {
+          completions: {
+            create: async (payload: any, options: any) => {
+              calls.push({ payload, options })
+              return {
+                choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+                usage: { prompt_tokens: 1, completion_tokens: 1 }
+              }
+            }
+          }
+        }
+      } as any
+    })
+
+    await provider.text!({
+      model: 'gpt-5-mini',
+      messages: [{ role: 'user', content: 'hi' }],
+      defaults: {
+        temperature: 0.1,
+        providerOptions: {
+          parallel_tool_calls: false,
+          service_tier: 'default'
+        }
+      },
+      call: {
+        providerOptions: {
+          seed: 123,
+          requestOptions: {
+            headers: { 'x-test': 'yes' }
+          }
+        }
+      },
+      signal: mockSignal()
+    })
+
+    expect(calls[0]?.payload).toMatchObject({
+      model: 'gpt-5-mini',
+      temperature: 0.1,
+      parallel_tool_calls: false,
+      service_tier: 'default',
+      seed: 123
+    })
+    expect(calls[0]?.options).toMatchObject({
+      headers: { 'x-test': 'yes' }
+    })
+    expect(calls[0]?.options.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('preserves assistant tool_calls before tool result messages', async () => {
+    const calls: Array<{ payload: any; options: any }> = []
+    const provider = openai({
+      client: {
+        chat: {
+          completions: {
+            create: async (payload: any, options: any) => {
+              calls.push({ payload, options })
+              return {
+                choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }],
+                usage: { prompt_tokens: 1, completion_tokens: 1 }
+              }
+            }
+          }
+        }
+      } as any
+    })
+
+    await provider.json!({
+      model: 'gpt-5-mini',
+      messages: [
+        { role: 'user', content: 'read a page' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'read_wiki_page', arguments: { slug: 'agent-harness' } }] },
+        { role: 'tool', toolCallId: 'call_1', content: '{"title":"Agent Harness"}' }
+      ],
+      schema: { type: 'object' },
+      signal: mockSignal()
+    })
+
+    expect(calls[0]?.payload.messages).toEqual([
+      { role: 'user', content: 'read a page' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{
+          id: 'call_1',
+          type: 'function',
+          function: {
+            name: 'read_wiki_page',
+            arguments: '{"slug":"agent-harness"}'
+          }
+        }]
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: '{"title":"Agent Harness"}' }
+    ])
+  })
+})

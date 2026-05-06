@@ -1,0 +1,192 @@
+import { createRequire } from 'node:module'
+import path from 'node:path'
+import { OperationCancelledError, OperationTimeoutError, HarnessConfigError, SandboxError, SandboxNoExecutorError } from '../errors/index.js'
+import type { DirEntry, ExecOptions, ExecResult, FileStat } from '../harness/types.js'
+import type { HarnessAdapterContext } from '../ports/harness-context.js'
+
+const require = createRequire(import.meta.url)
+
+export interface SandboxSession {
+  read(path: string): Promise<Uint8Array>
+  readText(path: string, encoding?: 'utf-8'): Promise<string>
+  write(path: string, data: Uint8Array | string): Promise<void>
+  remove(path: string, opts?: { recursive?: boolean }): Promise<void>
+  list(path: string, opts?: { recursive?: boolean; glob?: string }): Promise<DirEntry[]>
+  stat(path: string): Promise<FileStat>
+  exists(path: string): Promise<boolean>
+  mount(files: ReadonlyMap<string, Uint8Array | string>, atPath: string): Promise<void>
+  readonly executor: 'available' | 'unavailable'
+  exec(command: string, opts?: ExecOptions): Promise<ExecResult>
+  close(): Promise<void>
+}
+
+export interface Sandbox {
+  configureHarnessContext?(context: HarnessAdapterContext): void
+  open(opts: { sessionId: string; runId: string; signal?: AbortSignal }): Promise<SandboxSession>
+}
+
+type Node = { kind: 'file'; data: Uint8Array; modifiedAt: string } | { kind: 'directory'; modifiedAt: string }
+
+function now(): string { return new Date().toISOString() }
+
+function normalizePath(input: string): string {
+  if (!input.startsWith('/')) throw new SandboxError('Invalid path', { reason: 'invalid_path' })
+  const normalized = path.posix.normalize(input)
+  if (!normalized.startsWith('/')) throw new SandboxError('Invalid path', { reason: 'invalid_path' })
+  return normalized
+}
+
+class MemorySandboxSession implements SandboxSession {
+  private fs = new Map<string, Node>()
+  readonly executor: 'available' | 'unavailable'
+  private bashExec: ((command: string, opts?: ExecOptions) => Promise<ExecResult>) | undefined
+
+  constructor(executor: 'available' | 'unavailable', bashExec?: (command: string, opts?: ExecOptions) => Promise<ExecResult>) {
+    this.executor = executor
+    this.bashExec = bashExec
+    this.fs.set('/', { kind: 'directory', modifiedAt: now() })
+  }
+
+  private ensureParent(filePath: string): void {
+    const parts = normalizePath(filePath).split('/').filter(Boolean)
+    let current = '/'
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      current = current === '/' ? `/${parts[i]}` : `${current}/${parts[i]}`
+      if (!this.fs.has(current)) this.fs.set(current, { kind: 'directory', modifiedAt: now() })
+    }
+  }
+
+  async read(filePath: string): Promise<Uint8Array> {
+    const node = this.fs.get(normalizePath(filePath))
+    if (!node || node.kind !== 'file') throw new SandboxError('File not found', { reason: 'fs_failed' })
+    return node.data
+  }
+
+  async readText(filePath: string): Promise<string> { return new TextDecoder().decode(await this.read(filePath)) }
+
+  async write(filePath: string, data: Uint8Array | string): Promise<void> {
+    const p = normalizePath(filePath)
+    this.ensureParent(p)
+    this.fs.set(p, { kind: 'file', data: typeof data === 'string' ? new TextEncoder().encode(data) : data, modifiedAt: now() })
+  }
+
+  async remove(filePath: string, opts?: { recursive?: boolean }): Promise<void> {
+    const p = normalizePath(filePath)
+    if (opts?.recursive) {
+      for (const key of [...this.fs.keys()]) {
+        if (key === p || key.startsWith(`${p}/`)) this.fs.delete(key)
+      }
+      return
+    }
+    this.fs.delete(p)
+  }
+
+  async list(rootPath: string, opts?: { recursive?: boolean; glob?: string }): Promise<DirEntry[]> {
+    const root = normalizePath(rootPath)
+    const out: DirEntry[] = []
+    for (const [k, v] of this.fs.entries()) {
+      if (k === root) continue
+      if (!k.startsWith(root === '/' ? '/' : `${root}/`)) continue
+      const relative = root === '/' ? k.slice(1) : k.slice(root.length + 1)
+      if (!opts?.recursive && relative.includes('/')) continue
+      if (opts?.glob && !new RegExp(opts.glob.replaceAll('.', '\\.').replaceAll('*', '.*')).test(k)) continue
+      out.push({ name: k.split('/').at(-1) ?? '', path: k, kind: v.kind, ...(v.kind === 'file' ? { size: v.data.byteLength } : {}) })
+    }
+    return out.sort((a, b) => a.path.localeCompare(b.path))
+  }
+
+  async stat(filePath: string): Promise<FileStat> {
+    const node = this.fs.get(normalizePath(filePath))
+    if (!node) throw new SandboxError('Path not found', { reason: 'fs_failed' })
+    return { kind: node.kind, size: node.kind === 'file' ? node.data.byteLength : 0, modifiedAt: node.modifiedAt }
+  }
+
+  async exists(filePath: string): Promise<boolean> { return this.fs.has(normalizePath(filePath)) }
+
+  async mount(files: ReadonlyMap<string, Uint8Array | string>, atPath: string): Promise<void> {
+    const base = normalizePath(atPath)
+    for (const [rel, data] of files.entries()) {
+      const relNorm = rel.startsWith('/') ? rel.slice(1) : rel
+      await this.write(`${base}/${relNorm}`, data)
+    }
+  }
+
+  async exec(command: string, opts?: ExecOptions): Promise<ExecResult> {
+    if (this.executor === 'unavailable' || !this.bashExec) throw new SandboxNoExecutorError('Sandbox executor unavailable.', { session_id: 'unknown' })
+    return this.bashExec(command, opts)
+  }
+
+  async close(): Promise<void> {}
+}
+
+export function inMemorySandbox(): Sandbox {
+  return {
+    async open() { return new MemorySandboxSession('unavailable') }
+  }
+}
+
+export function bashSandbox(opts?: { network?: { allow?: string[]; deny?: string[] }; executionLimits?: { wallClockMs?: number; memoryMb?: number }; python?: boolean }): Sandbox {
+  let justBash: any
+  try {
+    justBash = require('just-bash')
+  } catch {
+    throw new HarnessConfigError('just-bash is not installed', { reason: 'just_bash_not_installed' })
+  }
+
+  return {
+    async open() {
+      const engine = justBash.createSandbox ? await justBash.createSandbox(opts) : new justBash.Bash({ ...opts, cwd: '/workspace' })
+      const exec = async (command: string, execOpts?: ExecOptions): Promise<ExecResult> => {
+        const started = Date.now()
+        if (execOpts?.signal?.aborted) throw new OperationCancelledError('Sandbox run was cancelled.', { scope: 'sandbox' })
+        if (!engine.exec) throw new HarnessConfigError('just-bash exec is unavailable', { reason: 'just_bash_exec_unavailable' })
+
+        const timeoutMs = execOpts?.timeoutMs
+        const controller = timeoutMs && timeoutMs > 0 ? new AbortController() : undefined
+        const signal = controller?.signal ?? execOpts?.signal
+        const sourceSignal = execOpts?.signal as (AbortSignal & {
+          addEventListener?: (type: 'abort', listener: () => void, options?: { once?: boolean }) => void
+          removeEventListener?: (type: 'abort', listener: () => void) => void
+        }) | undefined
+        let timeoutId: ReturnType<typeof setTimeout> | undefined
+        let abortListener: (() => void) | undefined
+
+        const abortPromise = sourceSignal?.addEventListener
+          ? new Promise<never>((_, reject) => {
+            abortListener = () => {
+              controller?.abort()
+              reject(new OperationCancelledError('Sandbox run was cancelled.', { scope: 'sandbox' }))
+            }
+            sourceSignal.addEventListener!('abort', abortListener, { once: true })
+          })
+          : undefined
+        const timeoutPromise = timeoutMs && timeoutMs > 0
+          ? new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              controller?.abort()
+              reject(new OperationTimeoutError('Sandbox run timed out.', { scope: 'sandbox_run', timeout_ms: timeoutMs }))
+            }, timeoutMs)
+          })
+          : undefined
+
+        try {
+          const runner = engine.exec(command, { cwd: execOpts?.cwd, env: execOpts?.env, stdin: execOpts?.stdin, signal })
+          const result = await Promise.race([runner, abortPromise, timeoutPromise].filter(Boolean))
+          return { stdout: result.stdout ?? '', stderr: result.stderr ?? '', exitCode: result.exitCode ?? 0, durationSeconds: (Date.now() - started) / 1000 }
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId)
+          if (abortListener) sourceSignal?.removeEventListener?.('abort', abortListener)
+        }
+      }
+      return new MemorySandboxSession('available', exec)
+    }
+  }
+}
+
+export function autoDetectSandbox(): Sandbox {
+  try {
+    return bashSandbox()
+  } catch {
+    return inMemorySandbox()
+  }
+}

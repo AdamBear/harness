@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": [
+    "src/models/globals.d.ts",
+    "src/errors/**/*.ts",
+    "src/logger/**/*.ts",
+    "src/telemetry/**/*.ts",
+    "src/ulid/**/*.ts",
+    "src/ports/**/*.ts",
+    "src/state/**/*.ts",
+    "src/models/**/*.ts",
+    "src/tools/**/*.ts",
+    "src/testing/stateStoreContract.ts",
+    "src/index.ts"
+  ],
+  "exclude": ["dist", "node_modules"]
+}

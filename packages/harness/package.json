@@ -1,0 +1,48 @@
+{
+  "name": "@purista/harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:types": "tsc -p tsconfig.type-tests.json",
+    "test": "vitest run",
+    "test:unit": "vitest run src",
+    "test:contracts": "vitest run src/ports test/sandbox.test.ts",
+    "test:integration": "vitest run test/harness.test.ts test/tools.test.ts test/skills.test.ts test/telemetry-flow.test.ts",
+    "test:failure": "vitest run test/failure"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@opentelemetry/semantic-conventions": "^1.40.0",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "just-bash": "^2.14.4"
+  },
+  "peerDependenciesMeta": {
+    "just-bash": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "just-bash": "^2.14.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  }
+}
