@@ -14,6 +14,9 @@
 |----------------------|------------|----------|-----------|-------|
 | `@purista/harness`   | ≥85%       | ≥80%     | ≥85%      | ≥85%  |
 | `@purista/harness-openai` | ≥80%  | ≥75%     | ≥80%      | ≥80%  |
+| `@purista/harness-anthropic` | ≥80%  | ≥75%     | ≥80%      | ≥80%  |
+| `@purista/harness-bedrock` | ≥80%  | ≥75%     | ≥80%      | ≥80%  |
+| `@purista/harness-azure-foundry` | ≥80%  | ≥75%     | ≥80%      | ≥80%  |
 
 CI fails if any gate is unmet.
 

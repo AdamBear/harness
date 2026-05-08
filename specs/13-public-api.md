@@ -1,9 +1,12 @@
 # Public API
 
-**Purpose.** Single source of truth for every symbol exported from the v1 package set. v1 publishes exactly two packages:
+**Purpose.** Single source of truth for every symbol exported from the v1 package set. The published package set includes the core package plus independent provider addons:
 
 - `@purista/harness` — harness, types, errors, in-memory adapters, TS+MCP tools, built-in JSON logger, telemetry. Testing helpers ship under the subpath export `@purista/harness/testing`.
 - `@purista/harness-openai` — OpenAI provider.
+- `@purista/harness-anthropic` — Anthropic provider.
+- `@purista/harness-bedrock` — Amazon Bedrock provider.
+- `@purista/harness-azure-foundry` — Azure AI Foundry provider.
 
 Non-core packages follow the convention `@purista/harness-{addon}`. The harness is published independently from the wider PuristaJS framework so it can be consumed standalone or composed inside [PuristaJS](https://purista.dev).
 
@@ -448,7 +451,13 @@ export type OpenAiFactoryOptions
 export type OpenAiClient
 ```
 
-Additional providers (Anthropic, etc.) are out of scope for v1. The `ModelProvider` port remains stable for v1.x provider packages and follows the `@purista/harness-{addon}` naming convention.
+Additional provider packages follow the `@purista/harness-{addon}` naming convention and expose one provider factory plus factory options/client types. The `ModelProvider` port remains stable for v1.x provider packages.
+
+Current provider addons:
+
+- `@purista/harness-anthropic`: `anthropic(options)`, `AnthropicFactoryOptions`, `AnthropicClient`
+- `@purista/harness-bedrock`: `bedrock(options)`, `BedrockFactoryOptions`, `BedrockClient`
+- `@purista/harness-azure-foundry`: `azureFoundry(options)`, `AzureFoundryFactoryOptions`, `AzureFoundryClient`
 
 ## Package surface summary
 
@@ -458,7 +467,7 @@ Every export listed above must be re-exported from the appropriate entry point:
 
 - `packages/harness/src/index.ts` → main entry list.
 - `packages/harness/src/testing/index.ts` → testing subpath list.
-- `packages/harness-openai/src/index.ts` → provider package list.
+- `packages/harness-openai/src/index.ts` and sibling provider addon entries → provider package lists.
 
 ## Schema conversion
 

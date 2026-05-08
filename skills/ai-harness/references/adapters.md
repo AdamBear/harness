@@ -3,6 +3,9 @@
 ## Contents
 - Model Provider Adapter
 - OpenAI-Compatible Provider
+- Anthropic Provider
+- Amazon Bedrock Provider
+- Azure AI Foundry Provider
 - State Store Adapter
 - Sandbox Adapter
 - Durable Runtime Adapter
@@ -100,6 +103,50 @@ openai({
 The OpenAI adapter supports chat-completions style text/object operations and embeddings. Declare only the capabilities the selected model and endpoint support.
 
 The adapter inherits harness logger, telemetry, and model timeout through `BaseModelProvider` unless explicit adapter options override them.
+
+## Anthropic Provider
+Use `@purista/harness-anthropic` for Anthropic Messages API models:
+
+```ts
+import { anthropic } from '@purista/harness-anthropic'
+
+anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY!
+})
+```
+
+The Anthropic adapter maps harness messages, tool calls, structured object
+generation, and streaming to the official `@anthropic-ai/sdk`.
+
+## Amazon Bedrock Provider
+Use `@purista/harness-bedrock` for Amazon Bedrock Runtime Converse models:
+
+```ts
+import { bedrock } from '@purista/harness-bedrock'
+
+bedrock({
+  region: process.env.AWS_REGION ?? 'us-east-1'
+})
+```
+
+The Bedrock adapter maps harness calls to the official
+`@aws-sdk/client-bedrock-runtime` Converse and ConverseStream APIs. AWS
+credentials use the standard AWS SDK credential chain.
+
+## Azure AI Foundry Provider
+Use `@purista/harness-azure-foundry` for Azure AI Foundry model endpoints:
+
+```ts
+import { azureFoundry } from '@purista/harness-azure-foundry'
+
+azureFoundry({
+  endpoint: process.env.AZURE_AI_ENDPOINT!,
+  apiKey: process.env.AZURE_AI_API_KEY!
+})
+```
+
+The Azure adapter maps chat completions, object generation, streaming, and
+embeddings to the official `@azure-rest/ai-inference` client.
 
 ## State Store Adapter
 Implement `StateStore` for durable sessions, messages, runs, and streamed events. Extend `StateStoreAdapterBase` when useful so logger, telemetry, and harness name are inherited:

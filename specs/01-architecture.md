@@ -38,8 +38,8 @@ Streaming is an internal concern of the harness; there is no separate `Stream` p
 - Higher layers may import lower layers; the reverse is forbidden.
 - All layers may import error types and the logger interface.
 - Non-core packages follow the convention `@purista/harness-{addon}`. The harness is published independently from the wider PuristaJS framework so it can be consumed standalone or composed inside [PuristaJS](https://purista.dev).
-- The provider package (`@purista/harness-openai`) MUST NOT depend on harness internals; it depends only on `@purista/harness` for port interfaces and types.
-- Provider packages MUST NOT depend on each other (no provider-to-provider imports). v1 ships only one provider, but the rule is locked for forward compatibility.
+- Provider packages MUST NOT depend on harness internals; they depend only on `@purista/harness` for port interfaces/types and their official provider SDKs.
+- Provider packages MUST NOT depend on each other (no provider-to-provider imports).
 - The harness package is the only package that may depend on `@modelcontextprotocol/sdk` (peer dep, scoped to the MCP tool runners).
 
 ## Package layout
@@ -52,6 +52,9 @@ packages/
       testing/index.ts     # exposed as @purista/harness/testing subpath export
     package.json           # exports map: "." and "./testing"
   harness-openai/          # @purista/harness-openai
+  harness-anthropic/       # @purista/harness-anthropic
+  harness-bedrock/         # @purista/harness-bedrock
+  harness-azure-foundry/   # @purista/harness-azure-foundry
     src/
       index.ts
     package.json
@@ -60,9 +63,10 @@ examples/
   ...                      # other spec-approved private examples
 ```
 
-Exactly two published packages. Private example workspaces are allowed under
-`examples/` when backed by specs. No `services/` or `apps/` package is part of
-v1. Workspace tool is locked to npm workspaces.
+Published packages are the core `@purista/harness` package plus independent
+provider addons under the `@purista/harness-*` convention. Private example
+workspaces are allowed under `examples/` when backed by specs. No `services/`
+or `apps/` package is part of v1. Workspace tool is locked to npm workspaces.
 
 The `harness` package contains:
 - core harness (`defineHarness` chainable builder, `Harness`, `Session`)
@@ -82,10 +86,11 @@ The `harness` package contains:
 |---------------------|--------------------------|----------------------------------------------------------------------------|
 | `@purista/harness`        | (none beyond peer)       | `typescript@>=5.4`, `zod@^4`, `@opentelemetry/api@^1`, `@opentelemetry/semantic-conventions@^1`, `@modelcontextprotocol/sdk@^1` (optional, only required when MCP tools are used; `peerDependenciesMeta.optional = true`), `just-bash@^0` (optional, only required when `bashSandbox()` is used; `peerDependenciesMeta.optional = true`), `vitest@^2` (peer of `@purista/harness/testing`) |
 | `@purista/harness-openai` | `@purista/harness`       | `typescript@>=5.4`, `openai@^4`                                            |
+| `@purista/harness-anthropic` | `@purista/harness`    | `typescript@>=5.4`, `@anthropic-ai/sdk`                                    |
+| `@purista/harness-bedrock` | `@purista/harness`      | `typescript@>=5.4`, `@aws-sdk/client-bedrock-runtime`                      |
+| `@purista/harness-azure-foundry` | `@purista/harness` | `typescript@>=5.4`, `@azure-rest/ai-inference`, `@azure/core-auth`, `@azure/core-sse` |
 
-Dev deps for every package: `typescript@>=5.4`, `vitest@^2`, `@types/node`. No others.
-
-Additional providers (Anthropic, etc.) are out of scope for v1.
+Dev deps for every package: `typescript@>=5.4`, `vitest@^2`, `@types/node`. Provider packages may add only their official provider SDK dependencies.
 
 ## Module shape inside the harness package
 

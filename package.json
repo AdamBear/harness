@@ -5,7 +5,7 @@
 	"description": "Self-hosted enterprise agent harness.",
 	"type": "module",
 	"engines": {
-		"node": ">=20 <25"
+		"node": ">=24.15.0"
 	},
 	"workspaces": [
 		"packages/*",

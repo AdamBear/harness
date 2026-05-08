@@ -67,6 +67,42 @@ flowchart LR
 })
 ```
 
+Provider packages are independent addons. Install only the SDK surface your
+application needs:
+
+```ts
+import { openai } from '@purista/harness-openai'
+import { anthropic } from '@purista/harness-anthropic'
+import { bedrock } from '@purista/harness-bedrock'
+import { azureFoundry } from '@purista/harness-azure-foundry'
+
+.models({
+  openai: {
+    provider: openai({ apiKey: process.env.OPENAI_API_KEY! }),
+    model: process.env.OPENAI_MODEL ?? 'gpt-5-mini',
+    capabilities: ['object', 'tool_use']
+  },
+  claude: {
+    provider: anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! }),
+    model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
+    capabilities: ['object', 'tool_use']
+  },
+  bedrock: {
+    provider: bedrock({ region: process.env.AWS_REGION ?? 'us-east-1' }),
+    model: process.env.BEDROCK_MODEL ?? 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+    capabilities: ['object', 'tool_use']
+  },
+  azure: {
+    provider: azureFoundry({
+      endpoint: process.env.AZURE_AI_ENDPOINT!,
+      apiKey: process.env.AZURE_AI_API_KEY!
+    }),
+    model: process.env.AZURE_AI_MODEL ?? 'gpt-4.1-mini',
+    capabilities: ['object', 'tool_use', 'embeddings']
+  }
+})
+```
+
 Capabilities gate runtime calls:
 
 | Capability | Enables |
@@ -128,6 +164,9 @@ executor-capable sandbox for built-in `bash`, exec-backed `grep`, and
 | `OPENAI_MODEL` | Model name used by examples, default `gpt-5-mini`. |
 | `OPENAI_BASE_URL` | Optional OpenAI-compatible endpoint. |
 | `OPENAI_ORG` / `OPENAI_PROJECT` | Optional OpenAI account routing. |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | Optional Anthropic provider configuration. |
+| `AWS_REGION` / `BEDROCK_MODEL` | Optional Amazon Bedrock provider configuration. |
+| `AZURE_AI_ENDPOINT` / `AZURE_AI_API_KEY` / `AZURE_AI_MODEL` | Optional Azure AI Foundry provider configuration. |
 | `PURISTA_HARNESS_LOG_LEVEL` | Logger level for `JsonLogger`. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/HTTP endpoint for traces, default example value `http://localhost:4318`. |
 | `LIVING_WIKI_DRAWIO_MCP_*` | Optional Living Wiki draw.io MCP integration. |

@@ -2,6 +2,9 @@
 
 ## Contents
 - OpenAI Provider
+- Anthropic Provider
+- Amazon Bedrock Provider
+- Azure AI Foundry Provider
 - Alias Shape
 - Capabilities
 - Direct Model Calls In Workflows Or Custom Agents
@@ -44,6 +47,68 @@ import { openai } from '@purista/harness-openai'
 ```
 
 Provider factory options are OpenAI SDK `ClientOptions` plus optional `client`, `harnessLogger`, `telemetry`, and `harnessTimeoutMs` for tests or adapter-level overrides.
+
+## Anthropic Provider
+Install and register Anthropic independently:
+
+```bash
+npm install @purista/harness @purista/harness-anthropic zod
+```
+
+```ts
+import { anthropic } from '@purista/harness-anthropic'
+
+.models({
+  assistant: {
+    provider: anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! }),
+    model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
+    capabilities: ['object', 'tool_use']
+  }
+})
+```
+
+## Amazon Bedrock Provider
+Install and register Amazon Bedrock Runtime independently:
+
+```bash
+npm install @purista/harness @purista/harness-bedrock zod
+```
+
+```ts
+import { bedrock } from '@purista/harness-bedrock'
+
+.models({
+  assistant: {
+    provider: bedrock({ region: process.env.AWS_REGION ?? 'us-east-1' }),
+    model: process.env.BEDROCK_MODEL ?? 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+    capabilities: ['object', 'tool_use']
+  }
+})
+```
+
+AWS credentials come from the official AWS SDK credential chain.
+
+## Azure AI Foundry Provider
+Install and register Azure AI Foundry independently:
+
+```bash
+npm install @purista/harness @purista/harness-azure-foundry zod
+```
+
+```ts
+import { azureFoundry } from '@purista/harness-azure-foundry'
+
+.models({
+  assistant: {
+    provider: azureFoundry({
+      endpoint: process.env.AZURE_AI_ENDPOINT!,
+      apiKey: process.env.AZURE_AI_API_KEY!
+    }),
+    model: process.env.AZURE_AI_MODEL ?? 'gpt-4.1-mini',
+    capabilities: ['object', 'tool_use']
+  }
+})
+```
 
 ## Alias Shape
 Each `.models(...)` entry is a `ModelAlias`:

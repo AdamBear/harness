@@ -2,7 +2,7 @@
 
 **Purpose.** Ordered build plan for an AI agent. Each phase has explicit deliverables, files to create, tests to pass, and exit criteria. Phases must be completed in order; later phases may depend on earlier exits.
 
-v1 ships exactly two packages: `@purista/harness` and `@purista/harness-openai`. Additional providers (Anthropic, etc.) are out of scope for v1. Non-core packages follow the convention `@purista/harness-{addon}`.
+The published package set contains `@purista/harness` plus independent provider addons. Non-core packages follow the convention `@purista/harness-{addon}`.
 
 ## Phase 1 — Harness core types, errors, logger, telemetry shims
 
@@ -158,6 +158,16 @@ Deliverables:
 - Provider descriptor metadata where it can be static and truthful.
 
 Exit: provider package green; coverage ≥80%.
+
+## Phase 13b — Additional provider addons
+
+Deliverables:
+- `packages/harness-anthropic/` with `anthropic(...)` extending `BaseModelProvider` over the official `@anthropic-ai/sdk`.
+- `packages/harness-bedrock/` with `bedrock(...)` extending `BaseModelProvider` over the official `@aws-sdk/client-bedrock-runtime`.
+- `packages/harness-azure-foundry/` with `azureFoundry(...)` extending `BaseModelProvider` over the official `@azure-rest/ai-inference` client.
+- Thin request/response mapping only: messages, tool declarations/tool calls, object/schema generation, streaming, usage, finish reasons, and provider option pass-through.
+
+Exit: provider package tests, typechecks, and build green; coverage ≥80%.
 
 ## Phase 14 — Quickstart and provider-parity examples
 

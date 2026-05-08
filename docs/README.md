@@ -61,6 +61,9 @@ flowchart TD
 |---|---|
 | `packages/harness` | Core runtime, builder, sessions, agents, workflows, tools, sandbox, state, telemetry, errors. |
 | `packages/harness-openai` | OpenAI model provider adapter. |
+| `packages/harness-anthropic` | Anthropic model provider adapter. |
+| `packages/harness-bedrock` | Amazon Bedrock model provider adapter. |
+| `packages/harness-azure-foundry` | Azure AI Foundry model provider adapter. |
 | `examples/quickstart` | Smallest typed harness example. |
 | `examples/showcase` | Skills, TypeScript tools, and multiple workflows. |
 | `examples/living-wiki-jaeger` | Full local research workspace with SSE, Jaeger, artifacts, review gates, Mermaid, draw.io XML, JSON panels, and Three.js graph. |

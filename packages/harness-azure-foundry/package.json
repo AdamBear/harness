@@ -1,7 +1,7 @@
 {
-  "name": "@purista/harness-openai",
+  "name": "@purista/harness-azure-foundry",
   "version": "1.0.0",
-  "description": "OpenAI model provider adapter for @purista/harness.",
+  "description": "Azure AI Foundry model provider adapter for @purista/harness.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,7 +23,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/puristajs/harness",
-    "directory": "packages/harness-openai"
+    "directory": "packages/harness-azure-foundry"
   },
   "bugs": {
     "url": "https://github.com/puristajs/harness/issues"
@@ -37,10 +37,12 @@
     "build": "npm run clean && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "test": "vitest run",
-    "lint": "echo 'no lint configured for @purista/harness-openai'"
+    "lint": "echo 'no lint configured for @purista/harness-azure-foundry'"
   },
   "dependencies": {
-    "openai": "^6.36.0"
+    "@azure-rest/ai-inference": "^1.0.0-beta.6",
+    "@azure/core-auth": "^1.10.1",
+    "@azure/core-sse": "^2.3.0"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.5",

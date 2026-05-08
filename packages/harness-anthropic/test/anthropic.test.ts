@@ -1,0 +1,149 @@
+import { describe, expect, it } from 'vitest'
+import { ModelError } from '@purista/harness'
+import { anthropic } from '../src/index.js'
+
+function mockSignal(): AbortSignal {
+  return new AbortController().signal
+}
+
+describe('anthropic provider factory', () => {
+  it('returns provider metadata and maps text response', async () => {
+    const provider = anthropic({
+      client: {
+        messages: {
+          create: async () => ({
+            content: [{ type: 'text', text: 'hello' }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 4, output_tokens: 2 }
+          })
+        }
+      }
+    })
+
+    expect(provider.id).toBe('anthropic')
+    expect(provider.genAiSystem).toBe('anthropic')
+
+    const response = await provider.text!({
+      model: 'claude-sonnet-4-5',
+      messages: [{ role: 'user', content: 'hi' }],
+      signal: mockSignal()
+    })
+
+    expect(response.content).toBe('hello')
+    expect(response.usage.totalTokens).toBe(6)
+    expect(response.finishReason).toBe('stop')
+  })
+
+  it('maps object response through a forced tool use', async () => {
+    const calls: any[] = []
+    const provider = anthropic({
+      client: {
+        messages: {
+          create: async (payload: any) => {
+            calls.push(payload)
+            return {
+              content: [{ type: 'tool_use', id: 'toolu_1', name: 'harness_response', input: { ok: true } }],
+              stop_reason: 'tool_use',
+              usage: { input_tokens: 3, output_tokens: 2 }
+            }
+          }
+        }
+      }
+    })
+
+    const schema = { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' } } }
+    const response = await provider.object!({
+      model: 'claude-sonnet-4-5',
+      messages: [{ role: 'user', content: 'object please' }],
+      schema,
+      signal: mockSignal()
+    })
+
+    expect(response.object).toEqual({ ok: true })
+    expect(response.usage.totalTokens).toBe(5)
+    expect(calls[0]).toMatchObject({
+      tool_choice: { type: 'tool', name: 'harness_response' },
+      tools: [{ name: 'harness_response', input_schema: schema }]
+    })
+  })
+
+  it('passes provider options through to the official SDK payload and request options', async () => {
+    const calls: Array<{ payload: any; options: any }> = []
+    const provider = anthropic({
+      client: {
+        messages: {
+          create: async (payload: any, options: any) => {
+            calls.push({ payload, options })
+            return {
+              content: [{ type: 'text', text: 'ok' }],
+              stop_reason: 'end_turn',
+              usage: { input_tokens: 1, output_tokens: 1 }
+            }
+          }
+        }
+      }
+    })
+
+    await provider.text!({
+      model: 'claude-sonnet-4-5',
+      messages: [{ role: 'system', content: 'Be terse.' }, { role: 'user', content: 'hi' }],
+      defaults: {
+        temperature: 0.1,
+        providerOptions: {
+          thinking: { type: 'disabled' }
+        }
+      },
+      call: {
+        providerOptions: {
+          metadata: { user_id: 'u1' },
+          requestOptions: { headers: { 'x-test': 'yes' } }
+        }
+      },
+      signal: mockSignal()
+    })
+
+    expect(calls[0]?.payload).toMatchObject({
+      model: 'claude-sonnet-4-5',
+      system: 'Be terse.',
+      temperature: 0.1,
+      thinking: { type: 'disabled' },
+      metadata: { user_id: 'u1' }
+    })
+    expect(calls[0]?.options).toMatchObject({ headers: { 'x-test': 'yes' } })
+    expect(calls[0]?.options.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('rejects invalid final object stream JSON with ModelError', async () => {
+    async function* chunks() {
+      yield { type: 'content_block_delta', delta: { type: 'text_delta', text: '{"ok":' } }
+    }
+
+    const provider = anthropic({
+      client: {
+        messages: {
+          create: async () => chunks()
+        }
+      }
+    })
+
+    await expect(async () => {
+      for await (const _chunk of provider.objectStream!({
+        model: 'claude-sonnet-4-5',
+        messages: [{ role: 'user', content: 'object please' }],
+        schema: { type: 'object' },
+        signal: mockSignal()
+      })) {
+        // consume the stream to force the final parse
+      }
+    }).rejects.toMatchObject({
+      constructor: ModelError,
+      meta: {
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-5',
+        method: 'objectStream',
+        reason: 'malformed_response',
+        providerBody: '{"ok":'
+      }
+    })
+  })
+})
