@@ -1,0 +1,25 @@
+# @purista/harness-anthropic
+
+Anthropic model provider adapter for `@purista/harness`.
+
+## Install
+
+```bash
+npm install @purista/harness @purista/harness-anthropic
+```
+
+Configure the provider with an Anthropic API key in your application
+environment. The adapter is designed for use through the typed
+`@purista/harness` model provider port.
+
+```ts
+import { anthropic } from '@purista/harness-anthropic'
+
+anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+```
+
+## Package Format
+
+This package is ESM-only and ships compiled JavaScript plus TypeScript
+declarations from `dist/`. Source files, tests, source maps, and local configs
+are not included in the published package.

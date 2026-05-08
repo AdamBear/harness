@@ -2,7 +2,7 @@
 
 This folder is the authoritative specification for the `@purista/harness` library and its provider ecosystem. The implementation agent must read every file. No file may be skipped; no decision may be improvised beyond what is locked here.
 
-The folder contains 20 files (this README plus 19 numbered specs). The v1 published package set is exactly two packages: `@purista/harness` (the umbrella library) and `@purista/harness-openai` (the OpenAI provider). Private examples may exist under `examples/` when backed by numbered specs. Non-core packages follow the convention `@purista/harness-{addon}` if future specs approve them. Shared tool execution, including TypeScript and MCP tools, is part of the harness contract.
+The folder contains 20 files (this README plus 19 numbered specs). The published package set includes `@purista/harness` (the umbrella library) plus independent provider addons such as `@purista/harness-openai`, `@purista/harness-anthropic`, `@purista/harness-bedrock`, and `@purista/harness-azure-foundry`. Private examples may exist under `examples/` when backed by numbered specs. Non-core packages follow the convention `@purista/harness-{addon}`. Shared tool execution, including TypeScript and MCP tools, is part of the harness contract.
 
 ## Reading order
 
@@ -33,7 +33,7 @@ For an implementation agent starting cold, read in this order:
 | File | Summary |
 |------|---------|
 | [00-overview.md](./00-overview.md) | Purpose, mental model, scope/non-goals, glossary. |
-| [01-architecture.md](./01-architecture.md) | Layering, dependency rules, two-package layout. |
+| [01-architecture.md](./01-architecture.md) | Layering, dependency rules, core-plus-provider package layout. |
 | [02-harness-config.md](./02-harness-config.md) | `defineHarness()` chainable builder, defaults, validation rules. |
 | [03-foundation.md](./03-foundation.md) | Logger interface, `HarnessError` base, OTel approach. |
 | [04-state-queue-stream.md](./04-state-queue-stream.md) | StateStore port + in-memory default + persisted shapes. |

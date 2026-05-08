@@ -13,6 +13,9 @@
 Published packages:
 - `@purista/harness`: core runtime, ports, adapters, errors, logger, telemetry, state, sandbox, tools, agents, workflows, sessions, testing subpath
 - `@purista/harness-openai`: OpenAI provider adapter
+- `@purista/harness-anthropic`: Anthropic provider adapter
+- `@purista/harness-bedrock`: Amazon Bedrock provider adapter
+- `@purista/harness-azure-foundry`: Azure AI Foundry provider adapter
 
 Package conventions:
 - packages are ESM-only
@@ -39,6 +42,21 @@ OpenAI entry exports:
 - `openai(options)`
 - `OpenAiFactoryOptions`
 - `OpenAiClient`
+
+Anthropic entry exports:
+- `anthropic(options)`
+- `AnthropicFactoryOptions`
+- `AnthropicClient`
+
+Amazon Bedrock entry exports:
+- `bedrock(options)`
+- `BedrockFactoryOptions`
+- `BedrockClient`
+
+Azure AI Foundry entry exports:
+- `azureFoundry(options)`
+- `AzureFoundryFactoryOptions`
+- `AzureFoundryClient`
 
 ## Testing Exports
 `@purista/harness/testing` exports:
@@ -71,7 +89,7 @@ Use these files as the implementation source of truth:
 | Telemetry | `telemetry/*`, `specs/14-otel-conventions.md` |
 | Durable runtime | `runtime/*` |
 | Errors | `errors/catalog.ts`, `errors/harness-error.ts` |
-| OpenAI adapter | `packages/harness-openai/src/index.ts` |
+| Provider adapters | `packages/harness-openai/src/index.ts`, `packages/harness-anthropic/src/index.ts`, `packages/harness-bedrock/src/index.ts`, `packages/harness-azure-foundry/src/index.ts` |
 
 ## Docs And Specs Map
 Use specs for intended contracts and docs for user-facing examples:

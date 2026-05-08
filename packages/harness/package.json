@@ -71,5 +71,8 @@
     "just-bash": "^2.14.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
+  },
+  "engines": {
+    "node": ">=24.15.0"
   }
 }

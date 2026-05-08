@@ -12,7 +12,7 @@ The harness gives PURISTA applications a typed runtime boundary for:
 - TypeScript, built-in, and MCP tools;
 - reusable skills;
 - state, sandboxing, logs, traces, and run events;
-- provider adapters such as OpenAI.
+- provider adapters for OpenAI, Anthropic, Amazon Bedrock, and Azure AI Foundry.
 
 This repository is not a SaaS product. It is lower-level infrastructure that
 application teams embed in services, workers, CLIs, or local tools.
@@ -80,6 +80,9 @@ npm run build
 
 - `packages/harness/` — Core runtime, contracts, ports, builder, sessions, tools, sandbox, telemetry, and test helpers.
 - `packages/harness-openai/` — OpenAI model provider adapter.
+- `packages/harness-anthropic/` — Anthropic model provider adapter.
+- `packages/harness-bedrock/` — Amazon Bedrock model provider adapter.
+- `packages/harness-azure-foundry/` — Azure AI Foundry model provider adapter.
 - `examples/quickstart/` — Smallest runnable PURISTA harness example.
 - `examples/showcase/` — Skills, TypeScript tools, and multiple workflow examples.
 - `examples/living-wiki-jaeger/` — Local research workspace with Hono, React/Vite, SSE, artifacts, MCP, and Jaeger.

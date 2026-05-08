@@ -9,6 +9,9 @@ full contract is specified in [specs/13-public-api.md](../../specs/13-public-api
 |---|---|
 | `@purista/harness` | Core runtime: builder, sessions, agents, workflows, tools, sandbox, state, telemetry, errors. |
 | `@purista/harness-openai` | OpenAI model provider adapter. |
+| `@purista/harness-anthropic` | Anthropic model provider adapter. |
+| `@purista/harness-bedrock` | Amazon Bedrock model provider adapter. |
+| `@purista/harness-azure-foundry` | Azure AI Foundry model provider adapter. |
 
 ## Application API
 
@@ -164,6 +167,29 @@ const provider = openai({
 The adapter extends `BaseModelProvider`, inherits harness logger/telemetry, and
 normalizes provider HTTP/network errors into `ModelError` with actionable
 metadata.
+
+## Provider Addons
+
+The provider addons share the same harness `ModelProvider` boundary. Each
+adapter is intentionally thin over the provider's official SDK and passes
+provider-specific options through instead of recreating provider feature
+matrices in harness code.
+
+```ts
+import { anthropic } from '@purista/harness-anthropic'
+import { bedrock } from '@purista/harness-bedrock'
+import { azureFoundry } from '@purista/harness-azure-foundry'
+
+const claude = anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+const aws = bedrock({ region: process.env.AWS_REGION ?? 'us-east-1' })
+const azure = azureFoundry({
+  endpoint: process.env.AZURE_AI_ENDPOINT!,
+  apiKey: process.env.AZURE_AI_API_KEY!
+})
+```
+
+Declare only the capabilities supported by the selected provider model or
+endpoint. The adapter package does not infer model-specific capability truth.
 
 ## Type Inference
 

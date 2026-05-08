@@ -1,7 +1,7 @@
 {
-  "name": "@purista/harness-openai",
+  "name": "@purista/harness-bedrock",
   "version": "1.0.0",
-  "description": "OpenAI model provider adapter for @purista/harness.",
+  "description": "Amazon Bedrock model provider adapter for @purista/harness.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,7 +23,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/puristajs/harness",
-    "directory": "packages/harness-openai"
+    "directory": "packages/harness-bedrock"
   },
   "bugs": {
     "url": "https://github.com/puristajs/harness/issues"
@@ -37,10 +37,10 @@
     "build": "npm run clean && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "test": "vitest run",
-    "lint": "echo 'no lint configured for @purista/harness-openai'"
+    "lint": "echo 'no lint configured for @purista/harness-bedrock'"
   },
   "dependencies": {
-    "openai": "^6.36.0"
+    "@aws-sdk/client-bedrock-runtime": "^3.1045.0"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.5",
